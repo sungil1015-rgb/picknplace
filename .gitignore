@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 로그 / 디버그 출력
+log/
+debug/
+
+# 테스트 결과
+result_*.json
+
+# 모델 weights (용량 큼 — 별도 공유)
+weights/*.pth
+weights/*.pt
+weights/*.onnx
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+debug_img
+debug_result
+debug_bbox
+weights
+img
+sampleimg

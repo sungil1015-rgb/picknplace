@@ -1,0 +1,27 @@
+{
+	"MODEL": "PickNPlace",
+	"MODE" : "GRPC",
+	"GPU_ID" : "0",
+    "LOG_PATH" : "./log",
+    "MODE_LIST" : [
+        {
+            "NAME" : "GRPC",
+            "SAVE_RESULT_PATH" : "./debug"
+        }
+    ],
+	"MODEL_LIST": [
+		{
+            "NAME" : "PickNPlace",
+            "CONFIG" : "./configs/mask2former.yaml",
+            "WEIGHT" : "facebook/mask2former-swin-base-coco-panoptic",
+            "SUPPORT" : ["GRPC"],
+            "USE_FILE_IO" : "True",
+            "OPTIONS" : {
+                "DETECTOR" : "mask2former",
+                "CLASSIFIER" : "dinov2",
+                "CLASSIFIER_CONFIG" : "./configs/dinov2.yaml",
+                "CALIBRATION_CONFIG" : "./configs/calibration.yaml"
+            }
+        }
+	]
+}

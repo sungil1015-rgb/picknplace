@@ -1,0 +1,399 @@
+"""
+PickNPlace 추론 파이프라인 (학생 구현 대상).
+
+grpc_mode 가 이 클래스를 다음 4개 API 로만 호출한다.
+더미 구현이 들어 있으므로 서버를 띄우면 바로 동작을 확인할 수 있다.
+TODO 주석이 달린 부분을 본인 모델 / 파이프라인으로 교체하면 된다.
+
+    1) PickNPlace(logger, config, weight, options, cuda)   - 생성자
+    2) set_intrinsic(cx, cy, fx, fy)                        - 카메라 intrinsic 적용
+    3) run(rgb, depth, normal, ...)                         - 추론 메인
+    4) save_result(rgb, predictions, polygons, ...)         - 시각화 결과 저장
+
+run() 의 반환 형태와 reply JSON 스키마는 README.md 의 "응답 형식" 절 참고.
+"""
+
+from typing import Any, Dict, List, Optional, Tuple
+import logging
+import os
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+from src.pipeline.suction_pipeline import SuctionPipeline
+from src.utils.geometry import extrinsic_from_translation_and_euler, make_intrinsic, quaternion_to_rotation_matrix
+
+
+class PickNPlace:
+    DEFAULT_POLYGON_APPROX_RATIO = 0.005
+    DEFAULT_POLYGON_MIN_EPSILON = 0.5
+
+    def __init__(
+            self,
+            logger: logging.Logger,
+            config_name: str,
+            checkpoint: str,
+            options: Dict[str, Any],
+            cuda: str = "0",
+    ) -> None:
+        self.logger = logger
+        self.name = "PickNPlace"
+        self.options = options
+        self.config_name = config_name
+        self.checkpoint = checkpoint
+        self.cuda = cuda
+        self.polygon_approx_ratio = float(self.options.get("POLYGON_APPROX_RATIO", self.DEFAULT_POLYGON_APPROX_RATIO))
+        self.polygon_min_epsilon = float(self.options.get("POLYGON_MIN_EPSILON", self.DEFAULT_POLYGON_MIN_EPSILON))
+
+        self.c_matrix = np.eye(3, dtype=np.float64)
+
+        self.extrinsic = self._load_extrinsic()
+
+        self.detector = self._load_detector()
+        self.classifier = self._load_classifier()
+        self.suction_pipeline = SuctionPipeline()
+        if self.detector is None:
+            self.logger.info(f"[{self.name}] 더미 모드로 초기화 (detector=None)")
+        self.logger.info(f"[{self.name}] config={config_name}, weight={checkpoint}")
+
+    def _device(self) -> str:
+        return f"cuda:{self.cuda}" if str(self.cuda).lower() not in ("", "cpu", "-1") else "cpu"
+
+    def _load_detector(self):
+        config_path = Path(self.config_name) if self.config_name else None
+        checkpoint_path = Path(self.checkpoint) if self.checkpoint else None
+        detector_name = str(self.options.get("DETECTOR", "")).lower()
+        is_mask2former = (
+            detector_name == "mask2former"
+            or (config_path is not None and "mask2former" in config_path.name.lower())
+            or (checkpoint_path is not None and "mask2former" in checkpoint_path.name.lower())
+        )
+        if not is_mask2former:
+            return None
+
+        try:
+            from src.detector.mask2former_detector import Mask2FormerDetector
+
+            device = self._device()
+            detector = Mask2FormerDetector(
+                config_file=self.config_name,
+                checkpoint_file=self.checkpoint,
+                device=device,
+            )
+            self.logger.info(f"[{self.name}] Mask2FormerDetector 로드 완료: device={device}")
+            return detector
+        except Exception as exc:
+            self.logger.exception(f"[{self.name}] Mask2FormerDetector 로드 실패: {exc}")
+            raise
+
+    def _load_classifier(self):
+        classifier_name = str(self.options.get("CLASSIFIER", "")).lower()
+        classifier_config = self.options.get("CLASSIFIER_CONFIG")
+        if classifier_name not in ("dinov2", "dino_v2") or not classifier_config:
+            return None
+        try:
+            import yaml
+
+            with open(classifier_config, "r", encoding="utf-8") as handle:
+                config = yaml.safe_load(handle) or {}
+            classifier_cfg = config.get("classifier", {})
+            if not isinstance(classifier_cfg, dict) or not bool(classifier_cfg.get("enabled", False)):
+                return None
+
+            from src.classifier import DinoV2KnnClassifier
+
+            classifier = DinoV2KnnClassifier(config_file=classifier_config, device=self._device())
+            self.logger.info(f"[{self.name}] DinoV2KnnClassifier 로드 완료: device={self._device()}")
+            return classifier
+        except Exception as exc:
+            self.logger.exception(f"[{self.name}] DinoV2KnnClassifier 로드 실패: {exc}")
+            raise
+
+    def _load_extrinsic(self) -> np.ndarray:
+        calibration_config = self.options.get("CALIBRATION_CONFIG")
+        if not calibration_config:
+            self.logger.warning(f"[{self.name}] CALIBRATION_CONFIG 없음 → extrinsic=identity 사용")
+            return np.eye(4, dtype=np.float64)
+
+        try:
+            import yaml
+
+            with open(calibration_config, "r", encoding="utf-8") as handle:
+                config = yaml.safe_load(handle) or {}
+            extrinsic_cfg = config.get("extrinsic", {})
+            matrix = extrinsic_cfg.get("robot_from_camera")
+            if matrix is not None:
+                extrinsic = np.asarray(matrix, dtype=np.float64)
+                if extrinsic.shape != (4, 4):
+                    raise ValueError(f"robot_from_camera must be 4x4, got {extrinsic.shape}")
+                if not np.allclose(extrinsic[3], np.array([0.0, 0.0, 0.0, 1.0])):
+                    raise ValueError("robot_from_camera last row must be [0, 0, 0, 1]")
+            else:
+                required_keys = ["cal_x", "cal_y", "cal_z", "cal_rx", "cal_ry", "cal_rz"]
+                missing_keys = [key for key in required_keys if key not in extrinsic_cfg]
+                if missing_keys:
+                    raise ValueError(f"extrinsic config missing keys: {missing_keys}")
+                rotation_order = str(extrinsic_cfg.get("rotation_order", "xyz"))
+                extrinsic = extrinsic_from_translation_and_euler(
+                    float(extrinsic_cfg["cal_x"]),
+                    float(extrinsic_cfg["cal_y"]),
+                    float(extrinsic_cfg["cal_z"]),
+                    float(extrinsic_cfg["cal_rx"]),
+                    float(extrinsic_cfg["cal_ry"]),
+                    float(extrinsic_cfg["cal_rz"]),
+                    order=rotation_order,
+                )
+            self.logger.info(f"[{self.name}] extrinsic 로드 완료: {calibration_config}")
+            return extrinsic
+        except Exception as exc:
+            self.logger.exception(f"[{self.name}] extrinsic 로드 실패: {exc}")
+            raise
+
+    # ─── 카메라 intrinsic ───────────────────────────────────────────────
+
+    def set_intrinsic(self, cx: float, cy: float, fx: float, fy: float) -> None:
+        """카메라 intrinsic 4개 파라미터를 받아 내부 c_matrix 에 반영."""
+        self.c_matrix = make_intrinsic(cx, cy, fx, fy)
+
+    def _mask_to_polygon(self, mask: np.ndarray) -> List[List[int]]:
+        binary_mask = (mask > 0).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        if not contours:
+            return []
+        contour = max(contours, key=cv2.contourArea)
+        perimeter = cv2.arcLength(contour, True)
+        epsilon = max(self.polygon_min_epsilon, perimeter * self.polygon_approx_ratio)
+        polygon = cv2.approxPolyDP(contour, epsilon, True)
+        if polygon.shape[0] < 3:
+            x, y, w, h = cv2.boundingRect(contour)
+            polygon = np.array([[[x, y]], [[x + w, y]], [[x + w, y + h]], [[x, y + h]]], dtype=np.int32)
+        return polygon.reshape(-1, 2).astype(int).tolist()
+
+    # ─── 추론 메인 ──────────────────────────────────────────────────────
+
+    def run(
+            self,
+            rgb_image: np.ndarray,
+            depth_image: Optional[np.ndarray] = None,
+            normal_image: Optional[np.ndarray] = None,
+            depth_scale: float = 1000,
+            compute_suction_pts: bool = False,
+            vis_pcd: bool = False,
+            save_ply: bool = False,
+            roi_2d: Optional[List[float]] = None,
+    ) -> Tuple[Dict[str, Any], List[Any]]:
+        """
+        추론 메인. 반환은 (result, predictions) 튜플.
+
+        ── 더미 구현 ──
+        detector 가 None 이면 입력 이미지 shape 만 로깅하고
+        '객체 없음(state=-2)' 결과를 반환한다.
+
+        TODO: 아래를 본인 detection + 3D pipeline 으로 교체.
+        """
+        self.logger.info(f"[{self.name}] run() 호출")
+        self.logger.info(f"[{self.name}]   rgb   : {rgb_image.shape if rgb_image is not None else None}")
+        self.logger.info(f"[{self.name}]   depth : {depth_image.shape if depth_image is not None else None}")
+        self.logger.info(f"[{self.name}]   normal: {normal_image.shape if normal_image is not None else None}")
+        self.logger.info(f"[{self.name}]   roi_2d: {roi_2d}")
+
+        # ── 더미: detector 가 없으면 예시 결과 반환 ──
+        # generate_example_data.py 의 사각형 2개를 검출한 것처럼 동작한다.
+        # 학생이 출력 형태를 확인하는 용도.
+        if self.detector is None:
+            self.logger.info(f"[{self.name}] detector=None → 더미 예시 결과 반환")
+
+            # 객체 A: 빨간 사각형 (150,120)-(300,280), depth=500mm
+            # 객체 B: 초록 사각형 (350,200)-(520,380), depth=600mm
+            polygons = [
+                [[150, 120], [300, 120], [300, 280], [150, 280]],
+                [[350, 200], [520, 200], [520, 380], [350, 380]],
+            ]
+            # suction_points: 객체별 picking 포인트 리스트
+            # 각 포인트는 ((x,y,z), (qx,qy,qz,qw)) — 로봇 베이스 좌표(mm) + 자세(quaternion)
+            suction_points = [
+                [   # 객체 A
+                    ((-44.899, -72.088, 1192.901), (0.597, 0.801, -0.006, -0.052)),
+                ],
+                [   # 객체 B
+                    ((-91.016, 165.696, 1138.743), (0.212, 0.969, -0.124, 0.036)),
+                ],
+            ]
+
+            result = {
+                "result_data": polygons,            # List[Polygon] — 객체별 polygon 좌표
+                "state": 1,                         # 1 = 정상 검출
+                "class_id": [0, 0],                 # List[int] — 객체별 surface id
+                "pts_per_object": [1, 1],           # List[int] — 객체별 suction 후보 개수
+                "suction_points": suction_points,   # List[List[((x,y,z),(qx,qy,qz,qw))]] — 로봇 좌표
+                "2d_roi": roi_2d if roi_2d else [],
+            }
+            return result, []
+
+        predictions = self.detector.inference(rgb_image, crop_box=roi_2d)
+
+        polygons: List[List[List[int]]] = []
+        class_ids: List[int] = []
+        suction_points: List[List[Any]] = []
+        kept_predictions = []
+
+        for prediction in predictions:
+            if prediction.mask is None:
+                continue
+            polygon = self._mask_to_polygon(prediction.mask)
+            if not polygon:
+                continue
+            polygons.append(polygon)
+            suction_points.append([])
+            kept_predictions.append(prediction)
+
+        if not polygons:
+            result = {
+                "result_data": [],
+                "state": -2,
+                "class_id": [],
+                "pts_per_object": [],
+                "suction_points": [],
+                "2d_roi": roi_2d if roi_2d else [],
+            }
+            return result, kept_predictions
+
+        if self.classifier is not None:
+            class_predictions = self.classifier.classify_instances(rgb_image, kept_predictions)
+            class_ids = [prediction.label for prediction in class_predictions]
+            for instance, class_prediction in zip(kept_predictions, class_predictions):
+                instance.label = class_prediction.label
+                instance.class_confidence = class_prediction.confidence
+                instance.class_similarity = class_prediction.similarity
+        else:
+            class_ids = [int(prediction.label) if prediction.label is not None else 0 for prediction in kept_predictions]
+
+        if compute_suction_pts:
+            suction_points = self.suction_pipeline.compute(
+                kept_predictions,
+                depth_image,
+                normal_image,
+                self.c_matrix,
+                self.extrinsic,
+            )
+
+        items = list(zip(polygons, class_ids, suction_points, kept_predictions))
+        items.sort(
+            key=lambda item: (
+                len(item[2]) > 0,
+                float(getattr(item[3], "class_similarity", 0.0)),
+                float(getattr(item[3], "score", 0.0) or 0.0),
+            ),
+            reverse=True,
+        )
+        polygons = [item[0] for item in items]
+        class_ids = [item[1] for item in items]
+        suction_points = [item[2] for item in items]
+        kept_predictions = [item[3] for item in items]
+
+        result = {
+            "result_data": polygons,
+            "state": 1,
+            "class_id": class_ids,
+            "pts_per_object": [len(points) for points in suction_points],
+            "suction_points": suction_points,
+            "2d_roi": roi_2d if roi_2d else [],
+        }
+        return result, kept_predictions
+
+    # ─── 결과 시각화 저장 ───────────────────────────────────────────────
+
+    def save_result(
+            self,
+            rgb_img: np.ndarray,
+            predictions: Any,
+            polygons: List[Any],
+            suction_pts: Optional[Any] = None,
+            save_path: str = ".",
+            save_name: str = "temp.png",
+            compute_suction_pts: bool = False,
+    ) -> None:
+        """
+        추론 결과를 이미지로 시각화해서 디스크에 저장.
+
+        ── 더미 구현 ──
+        detection 결과 없으면 원본 RGB 를 그대로 저장.
+
+        TODO: polygon, suction point 를 오버레이해서 시각화.
+        """
+        os.makedirs(save_path, exist_ok=True)
+        full_path = os.path.join(save_path, f"{save_name}.png")
+
+        if not polygons:
+            # 결과 없음 — 원본 이미지만 저장
+            cv2.imwrite(full_path, rgb_img)
+            self.logger.info(f"[{self.name}] save_result: 객체 없음 → 원본 저장 ({full_path})")
+            return
+
+        vis_img = rgb_img.copy()
+        for index, polygon in enumerate(polygons):
+            pts = np.array(polygon, dtype=np.int32)
+            if pts.ndim != 2 or pts.shape[0] < 3:
+                continue
+            color = (0, 255, 0)
+            cv2.polylines(vis_img, [pts], True, color, 2)
+            label = getattr(predictions[index], "label", index) if index < len(predictions) else index
+            cv2.putText(vis_img, str(label), tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+            contour_center = np.mean(pts, axis=0).astype(int)
+            cv2.circle(vis_img, tuple(contour_center), 5, (0, 255, 255), -1, cv2.LINE_AA)
+
+            if suction_pts and index < len(suction_pts) and suction_pts[index]:
+                point_info = suction_pts[index][0]
+                if isinstance(point_info, (list, tuple)) and len(point_info) == 2:
+                    position = point_info[0]
+                    quaternion = point_info[1]
+                    self._draw_suction_debug(vis_img, contour_center, position, quaternion)
+
+        cv2.imwrite(full_path, vis_img)
+        self.logger.info(f"[{self.name}] save_result: {full_path}")
+
+    def _draw_suction_debug(
+            self,
+            vis_img: np.ndarray,
+            anchor_xy: np.ndarray,
+            position_xyz: Any,
+            quaternion_xyzw: Any,
+    ) -> None:
+        try:
+            quaternion = np.asarray(quaternion_xyzw, dtype=np.float64)
+            rotation = quaternion_to_rotation_matrix(quaternion)
+            axis_x = rotation[:, 0]
+            axis_y = rotation[:, 1]
+            axis_z = rotation[:, 2]
+
+            anchor = np.asarray(anchor_xy, dtype=np.int32).reshape(2)
+            scale = 35
+
+            def _project(axis: np.ndarray) -> tuple[int, int]:
+                offset = np.array([axis[0], axis[1]], dtype=np.float64)
+                norm = np.linalg.norm(offset)
+                if norm < 1e-9:
+                    offset = np.array([1.0, 0.0], dtype=np.float64)
+                    norm = 1.0
+                offset = offset / norm
+                end = anchor + np.round(offset * scale).astype(np.int32)
+                return int(end[0]), int(end[1])
+
+            x_end = _project(axis_x)
+            y_end = _project(axis_y)
+            z_end = _project(axis_z)
+
+            cv2.arrowedLine(vis_img, tuple(anchor), x_end, (0, 0, 255), 2, cv2.LINE_AA, tipLength=0.2)
+            cv2.arrowedLine(vis_img, tuple(anchor), y_end, (0, 255, 0), 2, cv2.LINE_AA, tipLength=0.2)
+            cv2.arrowedLine(vis_img, tuple(anchor), z_end, (255, 0, 0), 2, cv2.LINE_AA, tipLength=0.2)
+
+            pos = np.asarray(position_xyz, dtype=np.float64).reshape(-1)
+            text = f"P[{pos[0]:.1f},{pos[1]:.1f},{pos[2]:.1f}] Q[{quaternion[0]:.2f},{quaternion[1]:.2f},{quaternion[2]:.2f},{quaternion[3]:.2f}]"
+            text_origin = (int(anchor[0] + 8), int(max(20, anchor[1] - 8)))
+            cv2.putText(vis_img, text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(vis_img, text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+        except Exception:
+            # 디버그 오버레이 실패는 저장 전체를 막지 않도록 무시한다.
+            return

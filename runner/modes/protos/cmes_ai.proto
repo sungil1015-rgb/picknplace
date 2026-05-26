@@ -1,0 +1,21 @@
+syntax = "proto3";
+option java_package = "ex.grpc";
+
+package cmes_ai;
+
+
+service CmesAiExecutor {
+  rpc Excute(Request) returns (Reply) {}
+}
+
+message Request
+{
+	string request_function_name=1;
+	bytes request_data = 2;
+}
+
+message Reply
+{
+	string reply_function_name=1;
+	bytes reply_data = 2;
+}

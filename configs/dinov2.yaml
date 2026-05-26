@@ -1,0 +1,8 @@
+classifier:
+  enabled: true
+  model_name: facebook/dinov2-base
+  reference_bank: weights/dinov2_reference_bank/bank_pruned.pt
+  top_k: 5
+  crop_padding: 8
+  masked_crop: true
+  min_similarity:

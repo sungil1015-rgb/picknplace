@@ -1,0 +1,13 @@
+model:
+  checkpoint: facebook/mask2former-swin-base-coco-panoptic
+  weights: weights/mask2former/mask2former.pt
+input:
+  size: [1024, 1224]
+crop:
+  enabled: true
+  tolerance: 1.0
+postprocess:
+  prediction_threshold: 0.6
+  mask_threshold: 0.6
+  overlap_threshold: 0.8
+  min_instance_area: 150
