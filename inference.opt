@@ -20,6 +20,7 @@
                 "DETECTOR" : "mask2former",
                 "CLASSIFIER" : "dinov2",
                 "CLASSIFIER_CONFIG" : "./configs/dinov2.yaml",
+                "PRIORITY_CONFIG" : "./configs/grasp_priority.yaml",
                 "CALIBRATION_CONFIG" : "./configs/calibration.yaml"
             }
         }

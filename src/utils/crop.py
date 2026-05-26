@@ -18,7 +18,7 @@ from PIL import Image
 DEFAULT_FOCAL_TOLERANCE = 10.0
 
 CROP_BOX_BY_FOCAL_LENGTH: tuple[tuple[float, tuple[float, float, float, float]], ...] = (
-	(2013.0, (150.822, 0.0, 1186.162, 717.821)),
+	(2013.0, (150.822, 0.0, 1186.162, 866.0)),
 	(1242.0, (200.718, 18.144, 961.63, 611.225)),
 )
 #"2d_roi": ["118","1190","98",813"]

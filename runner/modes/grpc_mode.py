@@ -135,6 +135,7 @@ class grpc_runner(cmes_ai_pb2_grpc.CmesAiExecutorServicer, base_mode):
 
     def agnostic(self, request_data):
         """gRPC handler — instance segmentation + suction 추론. 요청/응답 스키마는 README.md 참고."""
+        unique_id = "unknown"
         try:
             self.logger.info(f"{time.strftime('%Y%m%d_%H%M%S')} agnostic detection start..\n")
             s_init = time.perf_counter()

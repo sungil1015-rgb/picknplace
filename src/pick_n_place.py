@@ -21,6 +21,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from src.pipeline.grasp_priority import GraspPriorityScorer
 from src.pipeline.suction_pipeline import SuctionPipeline
 from src.utils.geometry import extrinsic_from_translation_and_euler, make_intrinsic, quaternion_to_rotation_matrix
 
@@ -28,6 +29,8 @@ from src.utils.geometry import extrinsic_from_translation_and_euler, make_intrin
 class PickNPlace:
     DEFAULT_POLYGON_APPROX_RATIO = 0.005
     DEFAULT_POLYGON_MIN_EPSILON = 0.5
+    FIXED_FOCAL_LENGTH = 2013.0
+    FIXED_SEGMENTATION_ROI = [150.822, 1186.162, 0.0, 866.0]
 
     def __init__(
             self,
@@ -53,6 +56,7 @@ class PickNPlace:
         self.detector = self._load_detector()
         self.classifier = self._load_classifier()
         self.suction_pipeline = SuctionPipeline()
+        self.priority_scorer = self._load_priority_scorer()
         if self.detector is None:
             self.logger.info(f"[{self.name}] 더미 모드로 초기화 (detector=None)")
         self.logger.info(f"[{self.name}] config={config_name}, weight={checkpoint}")
@@ -110,6 +114,33 @@ class PickNPlace:
             self.logger.exception(f"[{self.name}] DinoV2KnnClassifier 로드 실패: {exc}")
             raise
 
+    def _load_priority_scorer(self) -> GraspPriorityScorer:
+        priority_config = self.options.get("PRIORITY_CONFIG")
+        if not priority_config:
+            return GraspPriorityScorer()
+        try:
+            import yaml
+
+            with open(priority_config, "r", encoding="utf-8") as handle:
+                config = yaml.safe_load(handle) or {}
+            priority_cfg = config.get("priority", {})
+            if not isinstance(priority_cfg, dict):
+                raise ValueError("priority config section 'priority' must be a mapping")
+            scorer = GraspPriorityScorer(
+                depth_weight=float(priority_cfg.get("depth_weight", 0.55)),
+                center_weight=float(priority_cfg.get("center_weight", 0.20)),
+                isolation_weight=float(priority_cfg.get("isolation_weight", 0.25)),
+                area_weight=float(priority_cfg.get("area_weight", 0.0)),
+                depth_percentile=float(priority_cfg.get("depth_percentile", 20.0)),
+                erosion_kernel=int(priority_cfg.get("erosion_kernel", 5)),
+                isolation_dilation_kernel=int(priority_cfg.get("isolation_dilation_kernel", 31)),
+            )
+            self.logger.info(f"[{self.name}] GraspPriorityScorer 로드 완료: {priority_config}")
+            return scorer
+        except Exception as exc:
+            self.logger.exception(f"[{self.name}] GraspPriorityScorer 로드 실패: {exc}")
+            raise
+
     def _load_extrinsic(self) -> np.ndarray:
         calibration_config = self.options.get("CALIBRATION_CONFIG")
         if not calibration_config:
@@ -153,8 +184,8 @@ class PickNPlace:
     # ─── 카메라 intrinsic ───────────────────────────────────────────────
 
     def set_intrinsic(self, cx: float, cy: float, fx: float, fy: float) -> None:
-        """카메라 intrinsic 4개 파라미터를 받아 내부 c_matrix 에 반영."""
-        self.c_matrix = make_intrinsic(cx, cy, fx, fy)
+        """카메라 intrinsic을 반영하되 focal length는 2013으로 고정."""
+        self.c_matrix = make_intrinsic(cx, cy, self.FIXED_FOCAL_LENGTH, self.FIXED_FOCAL_LENGTH)
 
     def _mask_to_polygon(self, mask: np.ndarray) -> List[List[int]]:
         binary_mask = (mask > 0).astype(np.uint8) * 255
@@ -169,6 +200,15 @@ class PickNPlace:
             x, y, w, h = cv2.boundingRect(contour)
             polygon = np.array([[[x, y]], [[x + w, y]], [[x + w, y + h]], [[x, y + h]]], dtype=np.int32)
         return polygon.reshape(-1, 2).astype(int).tolist()
+
+    def _resolve_segmentation_roi(
+            self,
+            rgb_image: np.ndarray,
+            roi_2d: Optional[List[float]],
+    ) -> List[float]:
+        fixed_roi = list(self.FIXED_SEGMENTATION_ROI)
+        self.logger.info(f"[{self.name}] using fixed 2D ROI: {fixed_roi}")
+        return fixed_roi
 
     # ─── 추론 메인 ──────────────────────────────────────────────────────
 
@@ -197,6 +237,7 @@ class PickNPlace:
         self.logger.info(f"[{self.name}]   depth : {depth_image.shape if depth_image is not None else None}")
         self.logger.info(f"[{self.name}]   normal: {normal_image.shape if normal_image is not None else None}")
         self.logger.info(f"[{self.name}]   roi_2d: {roi_2d}")
+        resolved_roi_2d = self._resolve_segmentation_roi(rgb_image, roi_2d)
 
         # ── 더미: detector 가 없으면 예시 결과 반환 ──
         # generate_example_data.py 의 사각형 2개를 검출한 것처럼 동작한다.
@@ -227,11 +268,11 @@ class PickNPlace:
                 "class_id": [0, 0],                 # List[int] — 객체별 surface id
                 "pts_per_object": [1, 1],           # List[int] — 객체별 suction 후보 개수
                 "suction_points": suction_points,   # List[List[((x,y,z),(qx,qy,qz,qw))]] — 로봇 좌표
-                "2d_roi": roi_2d if roi_2d else [],
+                "2d_roi": resolved_roi_2d,
             }
             return result, []
 
-        predictions = self.detector.inference(rgb_image, crop_box=roi_2d)
+        predictions = self.detector.inference(rgb_image, crop_box=resolved_roi_2d)
 
         polygons: List[List[List[int]]] = []
         class_ids: List[int] = []
@@ -255,7 +296,7 @@ class PickNPlace:
                 "class_id": [],
                 "pts_per_object": [],
                 "suction_points": [],
-                "2d_roi": roi_2d if roi_2d else [],
+                "2d_roi": resolved_roi_2d,
             }
             return result, kept_predictions
 
@@ -264,8 +305,15 @@ class PickNPlace:
             class_ids = [prediction.label for prediction in class_predictions]
             for instance, class_prediction in zip(kept_predictions, class_predictions):
                 instance.label = class_prediction.label
+                instance.class_index = class_prediction.class_index
+                instance.class_name = class_prediction.class_name
                 instance.class_confidence = class_prediction.confidence
                 instance.class_similarity = class_prediction.similarity
+                instance.class_vote_ratio = class_prediction.vote_ratio
+                instance.class_margin = class_prediction.margin
+                instance.class_neighbor_indices = class_prediction.neighbor_indices
+                instance.class_neighbor_labels = class_prediction.neighbor_labels
+                instance.class_neighbor_similarities = class_prediction.neighbor_similarities
         else:
             class_ids = [int(prediction.label) if prediction.label is not None else 0 for prediction in kept_predictions]
 
@@ -278,10 +326,28 @@ class PickNPlace:
                 self.extrinsic,
             )
 
-        items = list(zip(polygons, class_ids, suction_points, kept_predictions))
+        priority_scores = self.priority_scorer.score_instances(
+            kept_predictions,
+            depth_image,
+            resolved_roi_2d,
+        )
+        for instance, priority_score in zip(kept_predictions, priority_scores):
+            instance.grasp_priority = priority_score.total
+            instance.grasp_depth_score = priority_score.depth_score
+            instance.grasp_center_score = priority_score.center_score
+            instance.grasp_isolation_score = priority_score.isolation_score
+            instance.grasp_area_score = priority_score.area_score
+            instance.grasp_neighbor_ratio = priority_score.neighbor_ratio
+            instance.grasp_mask_area = priority_score.mask_area
+            instance.grasp_object_depth = priority_score.object_depth
+            instance.grasp_center_distance = priority_score.center_distance
+            instance.grasp_valid_depth = priority_score.valid_depth
+
+        items = list(zip(polygons, class_ids, suction_points, kept_predictions, priority_scores))
         items.sort(
             key=lambda item: (
                 len(item[2]) > 0,
+                float(item[4].total),
                 float(getattr(item[3], "class_similarity", 0.0)),
                 float(getattr(item[3], "score", 0.0) or 0.0),
             ),
@@ -298,7 +364,7 @@ class PickNPlace:
             "class_id": class_ids,
             "pts_per_object": [len(points) for points in suction_points],
             "suction_points": suction_points,
-            "2d_roi": roi_2d if roi_2d else [],
+            "2d_roi": resolved_roi_2d,
         }
         return result, kept_predictions
 
@@ -336,13 +402,36 @@ class PickNPlace:
             pts = np.array(polygon, dtype=np.int32)
             if pts.ndim != 2 or pts.shape[0] < 3:
                 continue
-            color = (0, 255, 0)
-            cv2.polylines(vis_img, [pts], True, color, 2)
+            is_grasp_target = index == 0
+            color = (0, 0, 255) if is_grasp_target else (0, 180, 0)
+            thickness = 4 if is_grasp_target else 2
+            cv2.polylines(vis_img, [pts], True, color, thickness)
             label = getattr(predictions[index], "label", index) if index < len(predictions) else index
-            cv2.putText(vis_img, str(label), tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
             contour_center = np.mean(pts, axis=0).astype(int)
-            cv2.circle(vis_img, tuple(contour_center), 5, (0, 255, 255), -1, cv2.LINE_AA)
+            if is_grasp_target:
+                priority = getattr(predictions[index], "grasp_priority", None) if index < len(predictions) else None
+                depth = getattr(predictions[index], "grasp_object_depth", None) if index < len(predictions) else None
+                target_text = "GRASP #1"
+                if priority is not None:
+                    target_text += f" P:{float(priority):.2f}"
+                if depth is not None:
+                    target_text += f" D:{float(depth):.0f}"
+                text_origin = tuple(np.maximum(pts.min(axis=0) + np.array([0, -10]), np.array([0, 20])).astype(int))
+                cv2.putText(vis_img, target_text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 4, cv2.LINE_AA)
+                cv2.putText(vis_img, target_text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
+                cv2.drawMarker(
+                    vis_img,
+                    tuple(contour_center),
+                    color,
+                    markerType=cv2.MARKER_CROSS,
+                    markerSize=28,
+                    thickness=3,
+                    line_type=cv2.LINE_AA,
+                )
+            else:
+                cv2.putText(vis_img, str(label), tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+                cv2.circle(vis_img, tuple(contour_center), 5, (0, 255, 255), -1, cv2.LINE_AA)
 
             if suction_pts and index < len(suction_pts) and suction_pts[index]:
                 point_info = suction_pts[index][0]

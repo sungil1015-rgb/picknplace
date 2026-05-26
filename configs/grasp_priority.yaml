@@ -1,0 +1,8 @@
+priority:
+  depth_weight: 0.40
+  center_weight: 0.10
+  isolation_weight: 0.35
+  area_weight: 0.15
+  depth_percentile: 35.0
+  erosion_kernel: 2
+  isolation_dilation_kernel: 20
