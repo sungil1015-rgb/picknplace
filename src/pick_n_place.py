@@ -55,7 +55,10 @@ class PickNPlace:
 
         self.detector = self._load_detector()
         self.classifier = self._load_classifier()
-        self.suction_pipeline = SuctionPipeline()
+        self.suction_pipeline = SuctionPipeline(
+            depth_window=int(self.options.get("SUCTION_DEPTH_WINDOW", 5)),
+            normal_window=int(self.options.get("SUCTION_NORMAL_WINDOW", 5)),
+        )
         self.priority_scorer = self._load_priority_scorer()
         if self.detector is None:
             self.logger.info(f"[{self.name}] 더미 모드로 초기화 (detector=None)")
