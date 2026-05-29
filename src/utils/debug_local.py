@@ -148,7 +148,7 @@ def _class_color(class_id: Any) -> tuple[int, int, int]:
         (180, 80, 255),
         (80, 220, 120),
     ]
-    if class_id == -1:
+    if class_id == 5:
         return (160, 160, 160)
     try:
         return palette[int(class_id) % len(palette)]

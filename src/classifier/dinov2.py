@@ -143,11 +143,37 @@ def _to_pil_rgb(image: np.ndarray | Image.Image) -> Image.Image:
     raise ValueError(f"Unsupported image shape: {image.shape}")
 
 
+UNKNOWN_CLASS_ID = 5
+
+
 def _numeric_label(class_name: str, class_index: int) -> int:
     try:
         return int(class_name)
     except ValueError:
         return int(class_index)
+
+
+def _uses_one_based_known_labels(labels: torch.Tensor) -> bool:
+    unique_labels = {int(value.item()) for value in torch.unique(labels)}
+    return bool(unique_labels) and 0 not in unique_labels and unique_labels.issubset({1, 2, 3, 4, 5})
+
+
+def _normalize_known_labels(labels: torch.Tensor) -> tuple[torch.Tensor, bool]:
+    if _uses_one_based_known_labels(labels):
+        return labels - 1, True
+    return labels, False
+
+
+def _normalize_class_name(class_name: Any, one_based_labels: bool) -> str:
+    if not one_based_labels:
+        return str(class_name)
+    try:
+        class_id = int(class_name)
+    except (TypeError, ValueError):
+        return str(class_name)
+    if 1 <= class_id <= 5:
+        return str(class_id - 1)
+    return str(class_name)
 
 
 def _labels_to_tensor(labels: Any) -> torch.Tensor:
@@ -244,9 +270,13 @@ class DinoV2KnnClassifier:
                 f"Invalid DINOv2 reference bank shapes: embeddings={tuple(embeddings.shape)}, labels={tuple(labels.shape)}"
             )
 
+        labels, one_based_labels = _normalize_known_labels(labels)
         self.embeddings = F.normalize(embeddings, dim=-1).to(self.device)
         self.labels = labels.to(self.device)
-        self.class_names = [str(value) for value in bank.get("class_names", [])]
+        self.class_names = [
+            _normalize_class_name(value, one_based_labels)
+            for value in bank.get("class_names", [])
+        ]
         unique_labels = sorted(int(value.item()) for value in torch.unique(labels))
         if len(self.class_names) == len(unique_labels):
             self.label_to_class_name = {
@@ -463,9 +493,9 @@ class DinoV2KnnClassifier:
             is_unknown = True
 
         if is_unknown:
-            class_index = -1
+            class_index = UNKNOWN_CLASS_ID
             class_name = "unknown"
-            class_id = -1
+            class_id = UNKNOWN_CLASS_ID
 
         return ClassPrediction(
             label=class_id,

@@ -8,7 +8,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from src.classifier.dinov2 import ClassPrediction, DinoV2KnnClassifier, _load_yaml, _numeric_label
+from src.classifier.dinov2 import (
+    UNKNOWN_CLASS_ID,
+    ClassPrediction,
+    DinoV2KnnClassifier,
+    _load_yaml,
+    _numeric_label,
+)
 
 
 @dataclass(frozen=True)
@@ -187,9 +193,9 @@ class LogisticRegressionClassifier(DinoV2KnnClassifier):
         class_name = self.label_to_class_name.get(predicted_label, str(predicted_label))
         class_id = _numeric_label(class_name, predicted_label)
         if reject_reason is not None:
-            class_index = -1
+            class_index = UNKNOWN_CLASS_ID
             class_name = "unknown"
-            class_id = -1
+            class_id = UNKNOWN_CLASS_ID
 
         neighbor_labels = [int(label) for label in self.label_encoder.inverse_transform(np.argsort(probabilities)[::-1])]
         neighbor_similarities = [float(probabilities[self.label_encoder.transform([label])[0]]) for label in neighbor_labels]
