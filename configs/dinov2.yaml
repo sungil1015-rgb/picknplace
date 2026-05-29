@@ -9,10 +9,10 @@ classifier:
   cls_weight: 0.7
   patch_mean_weight: 0.3
   patch_mean_source: masked
-  rgb_weight: 0.8
-  gray_weight: 0.2
-  knn_temperature: 0.05
-  min_class_score: 0.45
-  min_similarity: 0.65
+  rgb_weight: 0.5
+  gray_weight: 0.5
+  knn_temperature: 0.02
+  min_class_score: 0.55
+  min_similarity: 0.55
   min_vote_ratio:
-  min_margin: 0.02
+  min_margin: 0.01

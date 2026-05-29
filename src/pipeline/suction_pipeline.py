@@ -50,12 +50,11 @@ class SuctionPipeline:
         extrinsic: np.ndarray,
     ) -> list[list[float]] | None:
         binary_mask = (mask > 0).astype(np.uint8)
+        binary_mask = self._largest_component_mask(binary_mask)
         if not np.any(binary_mask):
             return None
 
-        distance = cv2.distanceTransform(binary_mask, cv2.DIST_L2, 5)
-        _, _, _, max_location = cv2.minMaxLoc(distance)
-        u, v = int(max_location[0]), int(max_location[1])
+        u, v = self._mask_center_point(binary_mask)
 
         depth_mm = self._median_valid_depth(depth_image, u, v, binary_mask)
         if depth_mm is None:
@@ -69,12 +68,70 @@ class SuctionPipeline:
 
         reference_camera = self._principal_reference_camera(binary_mask, u, v, depth_mm, intrinsic, point_camera)
         reference_robot = transform_direction(reference_camera, extrinsic)
+        reference_robot = self._project_reference_to_tangent(reference_robot, normal_robot)
         quaternion = approach_and_reference_to_quaternion(-normal_robot, reference_robot)
 
         return [
             [round(float(value), 3) for value in point_robot],
             [round(float(value), 6) for value in quaternion],
         ]
+
+    @staticmethod
+    def _largest_component_mask(mask: np.ndarray) -> np.ndarray:
+        binary_mask = (mask > 0).astype(np.uint8)
+        if not np.any(binary_mask):
+            return binary_mask
+        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
+        if component_count <= 2:
+            return binary_mask
+        largest_label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        return (labels == largest_label).astype(np.uint8)
+
+    @staticmethod
+    def _mask_center_point(mask: np.ndarray) -> tuple[int, int]:
+        coords_yx = np.column_stack(np.where(mask > 0))
+        if coords_yx.shape[0] == 0:
+            return 0, 0
+
+        center_xy = coords_yx[:, ::-1].astype(np.float64).mean(axis=0)
+        center_u = int(round(center_xy[0]))
+        center_v = int(round(center_xy[1]))
+        if (
+            0 <= center_v < mask.shape[0]
+            and 0 <= center_u < mask.shape[1]
+            and mask[center_v, center_u] > 0
+        ):
+            return center_u, center_v
+
+        coords_xy = coords_yx[:, ::-1].astype(np.float64)
+        distances = np.sum((coords_xy - center_xy) ** 2, axis=1)
+        nearest_index = int(np.argmin(distances))
+        nearest = coords_xy[nearest_index]
+        return int(round(nearest[0])), int(round(nearest[1]))
+
+    @staticmethod
+    def _project_reference_to_tangent(reference: np.ndarray, normal: np.ndarray) -> np.ndarray:
+        normal = np.asarray(normal, dtype=np.float64)
+        normal_norm = np.linalg.norm(normal)
+        if normal_norm < 1e-9:
+            normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        else:
+            normal = normal / normal_norm
+
+        reference = np.asarray(reference, dtype=np.float64)
+        tangent = reference - np.dot(reference, normal) * normal
+        tangent_norm = np.linalg.norm(tangent)
+        if tangent_norm >= 1e-9:
+            return tangent / tangent_norm
+
+        fallback = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+        if abs(float(np.dot(fallback, normal))) > 0.9:
+            fallback = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+        tangent = fallback - np.dot(fallback, normal) * normal
+        tangent_norm = np.linalg.norm(tangent)
+        if tangent_norm < 1e-9:
+            return np.array([1.0, 0.0, 0.0], dtype=np.float64)
+        return tangent / tangent_norm
 
     def _principal_reference_camera(
         self,

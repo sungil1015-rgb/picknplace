@@ -10,14 +10,17 @@ import numpy as np
 @dataclass(frozen=True)
 class GraspPriorityScore:
     total: float
+    support_score: float
     depth_score: float
     center_score: float
     isolation_score: float
+    clearance_score: float
     area_score: float
-    neighbor_ratio: Optional[float]
+    clearance_distance: Optional[float]
     mask_area: Optional[int]
     object_depth: Optional[float]
     center_distance: Optional[float]
+    depth_candidate: bool
     valid_depth: bool
 
 
@@ -28,17 +31,21 @@ class GraspPriorityScorer:
         center_weight: float = 0.20,
         isolation_weight: float = 0.25,
         area_weight: float = 0.0,
+        mode: str = "weighted_sum",
+        depth_candidate_score_margin: float = 0.15,
         depth_percentile: float = 20.0,
         erosion_kernel: int = 5,
-        isolation_dilation_kernel: int = 31,
+        clearance_max_distance: float = 40.0,
     ) -> None:
         self.depth_weight = float(depth_weight)
         self.center_weight = float(center_weight)
         self.isolation_weight = float(isolation_weight)
         self.area_weight = float(area_weight)
+        self.mode = str(mode)
+        self.depth_candidate_score_margin = float(depth_candidate_score_margin)
         self.depth_percentile = float(depth_percentile)
         self.erosion_kernel = int(erosion_kernel)
-        self.isolation_dilation_kernel = int(isolation_dilation_kernel)
+        self.clearance_max_distance = float(clearance_max_distance)
 
     def score_instances(
         self,
@@ -57,25 +64,29 @@ class GraspPriorityScorer:
             if score.valid_depth and score.object_depth is not None
         ]
         area_scores = self._area_scores(raw_scores)
+        support_scores = [
+            self._support_score(score, area_score)
+            for score, area_score in zip(raw_scores, area_scores)
+        ]
+        max_support_score = max(support_scores, default=0.0)
         if not valid_depths:
             scores: list[GraspPriorityScore] = []
-            for score, area_score in zip(raw_scores, area_scores):
+            for score, area_score, support_score in zip(raw_scores, area_scores, support_scores):
                 scores.append(
                     GraspPriorityScore(
-                        total=float(
-                            (self.center_weight * score.center_score)
-                            + (self.isolation_weight * score.isolation_score)
-                            + (self.area_weight * area_score)
-                        ),
-                    depth_score=0.0,
-                    center_score=score.center_score,
-                    isolation_score=score.isolation_score,
-                    area_score=area_score,
-                    neighbor_ratio=score.neighbor_ratio,
-                    mask_area=score.mask_area,
-                    object_depth=score.object_depth,
-                    center_distance=score.center_distance,
-                    valid_depth=False,
+                        total=float(support_score),
+                        support_score=float(support_score),
+                        depth_score=0.0,
+                        center_score=score.center_score,
+                        isolation_score=score.isolation_score,
+                        clearance_score=score.clearance_score,
+                        area_score=area_score,
+                        clearance_distance=score.clearance_distance,
+                        mask_area=score.mask_area,
+                        object_depth=score.object_depth,
+                        center_distance=score.center_distance,
+                        depth_candidate=False,
+                        valid_depth=False,
                     )
                 )
             return scores
@@ -85,33 +96,32 @@ class GraspPriorityScorer:
         depth_range = max(max_depth - min_depth, 1e-6)
 
         scores: list[GraspPriorityScore] = []
-        for score, area_score in zip(raw_scores, area_scores):
+        for score, area_score, support_score in zip(raw_scores, area_scores, support_scores):
             if score.object_depth is None or not score.valid_depth:
                 depth_score = 0.0
-                total = (
-                    (self.center_weight * score.center_score)
-                    + (self.isolation_weight * score.isolation_score)
-                    + (self.area_weight * area_score)
-                )
+                depth_candidate = False
+                total = support_score
             else:
                 depth_score = 1.0 - float(np.clip((score.object_depth - min_depth) / depth_range, 0.0, 1.0))
-                total = (
-                    (self.depth_weight * depth_score)
-                    + (self.center_weight * score.center_score)
-                    + (self.isolation_weight * score.isolation_score)
-                    + (self.area_weight * area_score)
-                )
+                depth_candidate = support_score >= (max_support_score - self.depth_candidate_score_margin)
+                if self.mode == "support_then_depth":
+                    total = depth_score if depth_candidate else support_score - 1.0
+                else:
+                    total = (self.depth_weight * depth_score) + support_score
             scores.append(
                 GraspPriorityScore(
                     total=float(total),
+                    support_score=float(support_score),
                     depth_score=float(depth_score),
                     center_score=score.center_score,
                     isolation_score=score.isolation_score,
+                    clearance_score=score.clearance_score,
                     area_score=area_score,
-                    neighbor_ratio=score.neighbor_ratio,
+                    clearance_distance=score.clearance_distance,
                     mask_area=score.mask_area,
                     object_depth=score.object_depth,
                     center_distance=score.center_distance,
+                    depth_candidate=depth_candidate,
                     valid_depth=score.valid_depth,
                 )
             )
@@ -126,23 +136,33 @@ class GraspPriorityScorer:
         roi_2d: Optional[Sequence[float]],
     ) -> GraspPriorityScore:
         if mask is None or not np.any(mask):
-            return GraspPriorityScore(0.0, 0.0, 0.0, 0.0, 0.0, None, None, None, None, False)
+            return GraspPriorityScore(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None, None, None, None, False, False)
 
         center_score, center_distance = self._center_score(mask, roi_2d)
-        isolation_score, neighbor_ratio = self._isolation_score(mask, masks)
+        clearance_score, clearance_distance = self._clearance_score(mask, masks)
         object_depth = self._object_depth(mask, depth_image)
         mask_area = int(mask.sum())
         return GraspPriorityScore(
             total=0.0,
+            support_score=0.0,
             depth_score=0.0,
             center_score=center_score,
-            isolation_score=isolation_score,
+            isolation_score=clearance_score,
+            clearance_score=clearance_score,
             area_score=0.0,
-            neighbor_ratio=neighbor_ratio,
+            clearance_distance=clearance_distance,
             mask_area=mask_area,
             object_depth=object_depth,
             center_distance=center_distance,
+            depth_candidate=False,
             valid_depth=object_depth is not None,
+        )
+
+    def _support_score(self, score: GraspPriorityScore, area_score: float) -> float:
+        return float(
+            (self.center_weight * score.center_score)
+            + (self.isolation_weight * score.isolation_score)
+            + (self.area_weight * area_score)
         )
 
     @staticmethod
@@ -176,22 +196,11 @@ class GraspPriorityScorer:
         eroded = cv2.erode(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
         return eroded if np.any(eroded) else mask
 
-    def _isolation_score(
+    def _clearance_score(
         self,
         target_mask: np.ndarray,
         masks: Sequence[Optional[np.ndarray]],
     ) -> tuple[float, Optional[float]]:
-        if self.isolation_dilation_kernel <= 1:
-            return 1.0, 0.0
-
-        kernel_size = max(1, self.isolation_dilation_kernel)
-        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
-        dilated = cv2.dilate(target_mask.astype(np.uint8), kernel, iterations=1).astype(bool)
-        ring = dilated & ~target_mask
-        ring_area = int(ring.sum())
-        if ring_area == 0:
-            return 1.0, 0.0
-
         other_mask = np.zeros_like(target_mask, dtype=bool)
         for mask in masks:
             if mask is None or mask is target_mask:
@@ -200,9 +209,22 @@ class GraspPriorityScorer:
             width = min(other_mask.shape[1], mask.shape[1])
             other_mask[:height, :width] |= mask[:height, :width]
 
-        neighbor_pixels = int((ring & other_mask).sum())
-        neighbor_ratio = float(np.clip(neighbor_pixels / max(float(ring_area), 1.0), 0.0, 1.0))
-        return 1.0 - neighbor_ratio, neighbor_ratio
+        if not np.any(other_mask):
+            return 1.0, None
+
+        free_space = (~other_mask).astype(np.uint8)
+        distance = cv2.distanceTransform(free_space, cv2.DIST_L2, 5)
+        boundary = self._mask_boundary(target_mask)
+        if not np.any(boundary):
+            boundary = target_mask
+        clearance = float(np.percentile(distance[boundary], 10.0))
+        score = float(np.clip(clearance / max(self.clearance_max_distance, 1e-6), 0.0, 1.0))
+        return score, clearance
+
+    @staticmethod
+    def _mask_boundary(mask: np.ndarray) -> np.ndarray:
+        eroded = cv2.erode(mask.astype(np.uint8), np.ones((3, 3), dtype=np.uint8), iterations=1).astype(bool)
+        return mask & ~eroded
 
     @staticmethod
     def _area_scores(scores: Sequence[GraspPriorityScore]) -> list[float]:

@@ -129,11 +129,13 @@ class PickNPlace:
             scorer = GraspPriorityScorer(
                 depth_weight=float(priority_cfg.get("depth_weight", 0.55)),
                 center_weight=float(priority_cfg.get("center_weight", 0.20)),
-                isolation_weight=float(priority_cfg.get("isolation_weight", 0.25)),
+                isolation_weight=float(priority_cfg.get("clearance_weight", priority_cfg.get("isolation_weight", 0.25))),
                 area_weight=float(priority_cfg.get("area_weight", 0.0)),
+                mode=str(priority_cfg.get("mode", "weighted_sum")),
+                depth_candidate_score_margin=float(priority_cfg.get("depth_candidate_score_margin", 0.15)),
                 depth_percentile=float(priority_cfg.get("depth_percentile", 20.0)),
                 erosion_kernel=int(priority_cfg.get("erosion_kernel", 5)),
-                isolation_dilation_kernel=int(priority_cfg.get("isolation_dilation_kernel", 31)),
+                clearance_max_distance=float(priority_cfg.get("clearance_max_distance", 40.0)),
             )
             self.logger.info(f"[{self.name}] GraspPriorityScorer 로드 완료: {priority_config}")
             return scorer
@@ -200,6 +202,17 @@ class PickNPlace:
             x, y, w, h = cv2.boundingRect(contour)
             polygon = np.array([[[x, y]], [[x + w, y]], [[x + w, y + h]], [[x, y + h]]], dtype=np.int32)
         return polygon.reshape(-1, 2).astype(int).tolist()
+
+    @staticmethod
+    def _largest_component_mask(mask: np.ndarray) -> Optional[np.ndarray]:
+        binary_mask = (mask > 0).astype(np.uint8)
+        if not np.any(binary_mask):
+            return None
+        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
+        if component_count <= 1:
+            return None
+        largest_label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        return labels == largest_label
 
     def _resolve_segmentation_roi(
             self,
@@ -282,7 +295,11 @@ class PickNPlace:
         for prediction in predictions:
             if prediction.mask is None:
                 continue
-            polygon = self._mask_to_polygon(prediction.mask)
+            mask = self._largest_component_mask(prediction.mask)
+            if mask is None:
+                continue
+            prediction.mask = mask
+            polygon = self._mask_to_polygon(mask)
             if not polygon:
                 continue
             polygons.append(polygon)
@@ -333,14 +350,17 @@ class PickNPlace:
         )
         for instance, priority_score in zip(kept_predictions, priority_scores):
             instance.grasp_priority = priority_score.total
+            instance.grasp_support_score = priority_score.support_score
             instance.grasp_depth_score = priority_score.depth_score
             instance.grasp_center_score = priority_score.center_score
             instance.grasp_isolation_score = priority_score.isolation_score
+            instance.grasp_clearance_score = priority_score.clearance_score
             instance.grasp_area_score = priority_score.area_score
-            instance.grasp_neighbor_ratio = priority_score.neighbor_ratio
+            instance.grasp_clearance_distance = priority_score.clearance_distance
             instance.grasp_mask_area = priority_score.mask_area
             instance.grasp_object_depth = priority_score.object_depth
             instance.grasp_center_distance = priority_score.center_distance
+            instance.grasp_depth_candidate = priority_score.depth_candidate
             instance.grasp_valid_depth = priority_score.valid_depth
 
         items = list(zip(polygons, class_ids, suction_points, kept_predictions, priority_scores))
