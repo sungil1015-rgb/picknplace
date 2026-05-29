@@ -12,7 +12,7 @@ classifier:
   rgb_weight: 0.5
   gray_weight: 0.5
   knn_temperature: 0.02
-  min_class_score: 0.55
+  min_class_score: 0.6
   min_similarity: 0.55
   min_vote_ratio:
   min_margin: 0.01
