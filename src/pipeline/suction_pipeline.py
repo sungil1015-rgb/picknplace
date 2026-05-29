@@ -65,16 +65,28 @@ class SuctionPipeline:
 
         normal_camera = self._mean_valid_normal(normal_image, u, v, binary_mask)
         normal_robot = transform_normal(normal_camera, extrinsic)
+        normal_robot = self._orient_normal_z_up(normal_robot)
 
         reference_camera = self._principal_reference_camera(binary_mask, u, v, depth_mm, intrinsic, point_camera)
         reference_robot = transform_direction(reference_camera, extrinsic)
         reference_robot = self._project_reference_to_tangent(reference_robot, normal_robot)
-        quaternion = approach_and_reference_to_quaternion(-normal_robot, reference_robot)
+        quaternion = approach_and_reference_to_quaternion(normal_robot, reference_robot)
 
         return [
             [round(float(value), 3) for value in point_robot],
             [round(float(value), 6) for value in quaternion],
         ]
+
+    @staticmethod
+    def _orient_normal_z_up(normal: np.ndarray) -> np.ndarray:
+        normal = np.asarray(normal, dtype=np.float64)
+        norm = np.linalg.norm(normal)
+        if norm < 1e-9:
+            return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        normal = normal / norm
+        if normal[2] < 0.0:
+            normal = -normal
+        return normal
 
     @staticmethod
     def _largest_component_mask(mask: np.ndarray) -> np.ndarray:
