@@ -95,12 +95,31 @@ class PickNPlace:
         self.classifier = self._load_classifier()
         self.suction_pipeline = self._load_suction_pipeline()
         self.priority_scorer = self._load_priority_scorer()
+        # 동욱 파지점(picking.py) 연결 — config 의 picking.use_donguk (기본 True)
+        self.use_donguk_picking = bool(self.config.get("picking", {}).get("use_donguk", True))
+        self.donguk_picking = self._load_donguk_picking()
         if self.detector is None:
             self.logger.info(f"[{self.name}] 더미 모드로 초기화 (detector=None)")
         self.logger.info(f"[{self.name}] config={config_name}, weight={checkpoint}")
 
     def _device(self) -> str:
         return f"cuda:{self.cuda}" if str(self.cuda).lower() not in ("", "cpu", "-1") else "cpu"
+
+    def _load_donguk_picking(self):
+        """동욱 picking.py 어댑터 로드. 실패 시 None → 팀 SuctionPipeline 으로 폴백."""
+        try:
+            from src.pipeline.donguk_picking import DongukPicking
+
+            dp = DongukPicking(logger=self.logger)
+            self.logger.info(
+                f"[{self.name}] DongukPicking(파지점) 로드 완료 (use_donguk={self.use_donguk_picking})"
+            )
+            return dp
+        except Exception as exc:  # noqa: BLE001
+            self.logger.exception(
+                f"[{self.name}] DongukPicking 로드 실패 — 팀 SuctionPipeline 으로 폴백: {exc}"
+            )
+            return None
 
     def _load_detector(self):
         detector_type = str(_required(self.detector_cfg, "type", "detector")).lower()
@@ -350,13 +369,26 @@ class PickNPlace:
             class_ids = [int(prediction.label) if prediction.label is not None else 0 for prediction in kept_predictions]
 
         if compute_suction_pts:
-            suction_points = self.suction_pipeline.compute(
-                kept_predictions,
-                depth_image,
-                normal_image,
-                self.c_matrix,
-                self.extrinsic,
-            )
+            if self.use_donguk_picking and self.donguk_picking is not None:
+                # 동욱 picking.py 로 파지점 계산 (폴리곤+cid+organized grid 사용)
+                suction_points = self.donguk_picking.compute(
+                    kept_predictions,
+                    polygons,
+                    class_ids,
+                    rgb_image,
+                    depth_image,
+                    normal_image,
+                    self.c_matrix,
+                    self.extrinsic,
+                )
+            else:
+                suction_points = self.suction_pipeline.compute(
+                    kept_predictions,
+                    depth_image,
+                    normal_image,
+                    self.c_matrix,
+                    self.extrinsic,
+                )
 
         priority_scores = self.priority_scorer.score_instances(
             kept_predictions,
