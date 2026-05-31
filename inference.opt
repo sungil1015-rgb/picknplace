@@ -10,20 +10,13 @@
         }
     ],
 	"MODEL_LIST": [
-		{
+        {
             "NAME" : "PickNPlace",
-            "CONFIG" : "./configs/mask2former.yaml",
+            "CONFIG" : "./configs/pick_n_place.yaml",
             "WEIGHT" : "",
             "SUPPORT" : ["GRPC"],
             "USE_FILE_IO" : "True",
-            "OPTIONS" : {
-                "DETECTOR" : "mask2former",
-                "CLASSIFIER" : "dinov2",
-                "CLASSIFIER_CONFIG" : "./configs/dinov2.yaml",
-                "PRIORITY_CONFIG" : "./configs/grasp_priority.yaml",
-                "CALIBRATION_CONFIG" : "./configs/calibration.yaml",
-                "SUCTION_CONFIG" : "./configs/suction.yaml"
-            }
+            "OPTIONS" : {}
         }
 	]
 }

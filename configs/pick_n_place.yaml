@@ -1,0 +1,24 @@
+pipeline:
+  fixed_focal_length: 2013.0
+  segmentation_roi: [150.822, 1186.162, 0.0, 866.0]
+
+polygon:
+  approx_ratio: 0.005
+  min_epsilon: 0.5
+
+detector:
+  type: mask2former
+  config: ./configs/mask2former.yaml
+
+classifier:
+  type: dinov2
+  config: ./configs/dinov2.yaml
+
+priority:
+  config: ./configs/grasp_priority.yaml
+
+calibration:
+  config: ./configs/calibration.yaml
+
+suction:
+  config: ./configs/suction.yaml

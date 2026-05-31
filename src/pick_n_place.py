@@ -13,6 +13,8 @@ TODO 주석이 달린 부분을 본인 모델 / 파이프라인으로 교체하�
 run() 의 반환 형태와 reply JSON 스키마는 README.md 의 "응답 형식" 절 참고.
 """
 
+from __future__ import annotations
+
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 import os
@@ -23,22 +25,37 @@ import numpy as np
 
 from src.pipeline.grasp_priority import GraspPriorityScorer
 from src.pipeline.suction_pipeline import SuctionPipeline
-from src.utils.crop import DEFAULT_SEGMENTATION_ROI_2013
 from src.utils.geometry import extrinsic_from_translation_and_euler, make_intrinsic, quaternion_to_rotation_matrix
 from src.utils.mask import largest_component_mask, mask_to_polygon
-from src.utils.suction_footprint import (
-    DEFAULT_CUP_CENTER_SPACING_MM,
-    DEFAULT_CUP_DIAMETER_MM,
-    DEFAULT_MIN_CUP_INSIDE_RATIO,
-)
+
+
+def _load_yaml(path: str | Path) -> dict[str, Any]:
+    import yaml
+
+    config_path = Path(path)
+    if not config_path.is_file():
+        raise FileNotFoundError(f"PickNPlace config file not found: {config_path}")
+    with config_path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"PickNPlace config must be a mapping: {config_path}")
+    return data
+
+
+def _section(config: dict[str, Any], name: str) -> dict[str, Any]:
+    value = config.get(name)
+    if not isinstance(value, dict):
+        raise ValueError(f"PickNPlace config section '{name}' is required")
+    return value
+
+
+def _required(mapping: dict[str, Any], key: str, section_name: str) -> Any:
+    if key not in mapping:
+        raise ValueError(f"PickNPlace config '{section_name}.{key}' is required")
+    return mapping[key]
 
 
 class PickNPlace:
-    DEFAULT_POLYGON_APPROX_RATIO = 0.005
-    DEFAULT_POLYGON_MIN_EPSILON = 0.5
-    FIXED_FOCAL_LENGTH = 2013.0
-    FIXED_SEGMENTATION_ROI = DEFAULT_SEGMENTATION_ROI_2013
-
     def __init__(
             self,
             logger: logging.Logger,
@@ -53,8 +70,22 @@ class PickNPlace:
         self.config_name = config_name
         self.checkpoint = checkpoint
         self.cuda = cuda
-        self.polygon_approx_ratio = float(self.options.get("POLYGON_APPROX_RATIO", self.DEFAULT_POLYGON_APPROX_RATIO))
-        self.polygon_min_epsilon = float(self.options.get("POLYGON_MIN_EPSILON", self.DEFAULT_POLYGON_MIN_EPSILON))
+        self.config = _load_yaml(config_name)
+
+        pipeline_cfg = _section(self.config, "pipeline")
+        polygon_cfg = _section(self.config, "polygon")
+        self.fixed_focal_length = float(_required(pipeline_cfg, "fixed_focal_length", "pipeline"))
+        self.segmentation_roi = [float(value) for value in _required(pipeline_cfg, "segmentation_roi", "pipeline")]
+        if len(self.segmentation_roi) != 4:
+            raise ValueError("PickNPlace config 'pipeline.segmentation_roi' must contain 4 values")
+        self.polygon_approx_ratio = float(_required(polygon_cfg, "approx_ratio", "polygon"))
+        self.polygon_min_epsilon = float(_required(polygon_cfg, "min_epsilon", "polygon"))
+
+        self.detector_cfg = _section(self.config, "detector")
+        self.classifier_cfg = _section(self.config, "classifier")
+        self.priority_cfg = _section(self.config, "priority")
+        self.calibration_cfg = _section(self.config, "calibration")
+        self.suction_cfg = _section(self.config, "suction")
 
         self.c_matrix = np.eye(3, dtype=np.float64)
 
@@ -72,15 +103,8 @@ class PickNPlace:
         return f"cuda:{self.cuda}" if str(self.cuda).lower() not in ("", "cpu", "-1") else "cpu"
 
     def _load_detector(self):
-        config_path = Path(self.config_name) if self.config_name else None
-        checkpoint_path = Path(self.checkpoint) if self.checkpoint else None
-        detector_name = str(self.options.get("DETECTOR", "")).lower()
-        is_mask2former = (
-            detector_name == "mask2former"
-            or (config_path is not None and "mask2former" in config_path.name.lower())
-            or (checkpoint_path is not None and "mask2former" in checkpoint_path.name.lower())
-        )
-        if not is_mask2former:
+        detector_type = str(_required(self.detector_cfg, "type", "detector")).lower()
+        if detector_type != "mask2former":
             return None
 
         try:
@@ -88,7 +112,7 @@ class PickNPlace:
 
             device = self._device()
             detector = Mask2FormerDetector(
-                config_file=self.config_name,
+                config_file=str(_required(self.detector_cfg, "config", "detector")),
                 checkpoint_file=self.checkpoint,
                 device=device,
             )
@@ -99,15 +123,12 @@ class PickNPlace:
             raise
 
     def _load_classifier(self):
-        classifier_name = str(self.options.get("CLASSIFIER", "")).lower()
-        classifier_config = self.options.get("CLASSIFIER_CONFIG")
+        classifier_name = str(_required(self.classifier_cfg, "type", "classifier")).lower()
+        classifier_config = str(_required(self.classifier_cfg, "config", "classifier"))
         if classifier_name not in ("dinov2", "dino_v2") or not classifier_config:
             return None
         try:
-            import yaml
-
-            with open(classifier_config, "r", encoding="utf-8") as handle:
-                config = yaml.safe_load(handle) or {}
+            config = _load_yaml(classifier_config)
             classifier_cfg = config.get("classifier", {})
             if not isinstance(classifier_cfg, dict) or not bool(classifier_cfg.get("enabled", False)):
                 return None
@@ -122,27 +143,22 @@ class PickNPlace:
             raise
 
     def _load_priority_scorer(self) -> GraspPriorityScorer:
-        priority_config = self.options.get("PRIORITY_CONFIG")
-        if not priority_config:
-            return GraspPriorityScorer()
+        priority_config = str(_required(self.priority_cfg, "config", "priority"))
         try:
-            import yaml
-
-            with open(priority_config, "r", encoding="utf-8") as handle:
-                config = yaml.safe_load(handle) or {}
+            config = _load_yaml(priority_config)
             priority_cfg = config.get("priority", {})
             if not isinstance(priority_cfg, dict):
                 raise ValueError("priority config section 'priority' must be a mapping")
             scorer = GraspPriorityScorer(
-                depth_weight=float(priority_cfg.get("depth_weight", 0.55)),
-                center_weight=float(priority_cfg.get("center_weight", 0.20)),
-                isolation_weight=float(priority_cfg.get("clearance_weight", priority_cfg.get("isolation_weight", 0.25))),
-                area_weight=float(priority_cfg.get("area_weight", 0.0)),
-                mode=str(priority_cfg.get("mode", "weighted_sum")),
-                depth_candidate_score_margin=float(priority_cfg.get("depth_candidate_score_margin", 0.15)),
-                depth_percentile=float(priority_cfg.get("depth_percentile", 20.0)),
-                erosion_kernel=int(priority_cfg.get("erosion_kernel", 5)),
-                clearance_max_distance=float(priority_cfg.get("clearance_max_distance", 40.0)),
+                depth_weight=float(_required(priority_cfg, "depth_weight", "priority")),
+                center_weight=float(_required(priority_cfg, "center_weight", "priority")),
+                isolation_weight=float(_required(priority_cfg, "clearance_weight", "priority")),
+                area_weight=float(_required(priority_cfg, "area_weight", "priority")),
+                mode=str(_required(priority_cfg, "mode", "priority")),
+                depth_candidate_score_margin=float(_required(priority_cfg, "depth_candidate_score_margin", "priority")),
+                depth_percentile=float(_required(priority_cfg, "depth_percentile", "priority")),
+                erosion_kernel=int(_required(priority_cfg, "erosion_kernel", "priority")),
+                clearance_max_distance=float(_required(priority_cfg, "clearance_max_distance", "priority")),
             )
             self.logger.info(f"[{self.name}] GraspPriorityScorer 로드 완료: {priority_config}")
             return scorer
@@ -151,54 +167,33 @@ class PickNPlace:
             raise
 
     def _load_suction_pipeline(self) -> SuctionPipeline:
-        suction_cfg: dict[str, Any] = {}
-        suction_config = self.options.get("SUCTION_CONFIG")
-        if suction_config:
-            try:
-                import yaml
-
-                with open(suction_config, "r", encoding="utf-8") as handle:
-                    config = yaml.safe_load(handle) or {}
-                value = config.get("suction", {})
-                if not isinstance(value, dict):
-                    raise ValueError("suction config section 'suction' must be a mapping")
-                suction_cfg = value
-                self.logger.info(f"[{self.name}] SuctionPipeline config 로드 완료: {suction_config}")
-            except Exception as exc:
-                self.logger.exception(f"[{self.name}] SuctionPipeline config 로드 실패: {exc}")
-                raise
+        suction_config = str(_required(self.suction_cfg, "config", "suction"))
+        try:
+            config = _load_yaml(suction_config)
+            suction_cfg = config.get("suction", {})
+            if not isinstance(suction_cfg, dict):
+                raise ValueError("suction config section 'suction' must be a mapping")
+            self.logger.info(f"[{self.name}] SuctionPipeline config 로드 완료: {suction_config}")
+        except Exception as exc:
+            self.logger.exception(f"[{self.name}] SuctionPipeline config 로드 실패: {exc}")
+            raise
 
         return SuctionPipeline(
-            depth_window=int(suction_cfg.get("depth_window", self.options.get("SUCTION_DEPTH_WINDOW", 5))),
-            normal_window=int(suction_cfg.get("normal_window", self.options.get("SUCTION_NORMAL_WINDOW", 5))),
-            cup_diameter_mm=float(
-                suction_cfg.get("cup_diameter_mm", self.options.get("SUCTION_CUP_DIAMETER_MM", DEFAULT_CUP_DIAMETER_MM))
-            ),
-            cup_center_spacing_mm=float(
-                suction_cfg.get(
-                    "cup_center_spacing_mm",
-                    self.options.get("SUCTION_CUP_CENTER_SPACING_MM", DEFAULT_CUP_CENTER_SPACING_MM),
-                )
-            ),
-            min_cup_inside_ratio=float(
-                suction_cfg.get(
-                    "min_cup_inside_ratio",
-                    self.options.get("SUCTION_MIN_CUP_INSIDE_RATIO", DEFAULT_MIN_CUP_INSIDE_RATIO),
-                )
-            ),
+            depth_window=int(_required(suction_cfg, "depth_window", "suction")),
+            normal_window=int(_required(suction_cfg, "normal_window", "suction")),
+            cup_diameter_mm=float(_required(suction_cfg, "cup_diameter_mm", "suction")),
+            cup_center_spacing_mm=float(_required(suction_cfg, "cup_center_spacing_mm", "suction")),
+            min_cup_inside_ratio=float(_required(suction_cfg, "min_cup_inside_ratio", "suction")),
+            candidate_count=int(_required(suction_cfg, "candidate_count", "suction")),
+            candidate_min_distance_px=float(_required(suction_cfg, "candidate_min_distance_px", "suction")),
+            pca_offset_px=float(_required(suction_cfg, "pca_offset_px", "suction")),
         )
 
     def _load_extrinsic(self) -> np.ndarray:
-        calibration_config = self.options.get("CALIBRATION_CONFIG")
-        if not calibration_config:
-            self.logger.warning(f"[{self.name}] CALIBRATION_CONFIG 없음 → extrinsic=identity 사용")
-            return np.eye(4, dtype=np.float64)
+        calibration_config = str(_required(self.calibration_cfg, "config", "calibration"))
 
         try:
-            import yaml
-
-            with open(calibration_config, "r", encoding="utf-8") as handle:
-                config = yaml.safe_load(handle) or {}
+            config = _load_yaml(calibration_config)
             extrinsic_cfg = config.get("extrinsic", {})
             matrix = extrinsic_cfg.get("robot_from_camera")
             if matrix is not None:
@@ -231,15 +226,15 @@ class PickNPlace:
     # ─── 카메라 intrinsic ───────────────────────────────────────────────
 
     def set_intrinsic(self, cx: float, cy: float, fx: float, fy: float) -> None:
-        """카메라 intrinsic을 반영하되 focal length는 2013으로 고정."""
-        self.c_matrix = make_intrinsic(cx, cy, self.FIXED_FOCAL_LENGTH, self.FIXED_FOCAL_LENGTH)
+        """카메라 intrinsic을 반영하되 focal length는 pipeline config 값으로 고정."""
+        self.c_matrix = make_intrinsic(cx, cy, self.fixed_focal_length, self.fixed_focal_length)
 
     def _resolve_segmentation_roi(
             self,
             rgb_image: np.ndarray,
             roi_2d: Optional[List[float]],
     ) -> List[float]:
-        fixed_roi = list(self.FIXED_SEGMENTATION_ROI)
+        fixed_roi = list(self.segmentation_roi)
         self.logger.info(f"[{self.name}] using fixed 2D ROI: {fixed_roi}")
         return fixed_roi
 

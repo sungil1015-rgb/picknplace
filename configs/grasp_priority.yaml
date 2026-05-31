@@ -1,6 +1,7 @@
 priority:
   # support_then_depth: center/clearance/area로 1차 후보군을 만들고, 그 후보군 안에서 depth가 가장 가까운 물체를 최종 선택한다.
   mode: support_then_depth
+  depth_weight: 0.55
 
   # 물체 중심이 박스 중심에 가까울수록 높게 주는 가중치. 너무 키우면 중앙 물체만 과하게 선호.
   center_weight: 0.00

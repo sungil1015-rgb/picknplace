@@ -3,9 +3,15 @@ suction:
   depth_window: 5
   normal_window: 20
 
+  # 후보점 생성:
+  # 1) mask center, 2) PCA long/short axis offset, 3) distance transform 상위점.
+  candidate_count: 12
+  candidate_min_distance_px: 20.0
+  pca_offset_px: 25.0
+
   # dual suction cup 실제 규격(mm).
   cup_diameter_mm: 25.0
   cup_center_spacing_mm: 35.0
 
   # 각 cup footprint 원 내부 픽셀 중 mask 안에 들어와야 하는 최소 비율.
-  min_cup_inside_ratio: 0.85
+  min_cup_inside_ratio: 0.95
