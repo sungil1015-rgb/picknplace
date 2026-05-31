@@ -16,12 +16,20 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from runner.modes.utils.option_manager import load_option_file
 from src.pick_n_place import PickNPlace
+from src.utils.crop import DEFAULT_SEGMENTATION_ROI_2013
+from src.utils.depth import median_valid_depth_at_point
 from src.utils.geometry import quaternion_to_rotation_matrix
+from src.utils.mask import largest_component_mask, mask_center_point
+from src.utils.suction_footprint import (
+    DEFAULT_CUP_CENTER_SPACING_MM,
+    DEFAULT_CUP_DIAMETER_MM,
+    compute_dual_cup_footprint,
+)
 
 
-DEBUG_ROI_2013 = [150.822, 1186.162, 0.0, 866.0]
-CUP_DIAMETER_MM = 25.0
-CUP_CENTER_SPACING_MM = 35.0
+DEBUG_ROI_2013 = DEFAULT_SEGMENTATION_ROI_2013
+CUP_DIAMETER_MM = DEFAULT_CUP_DIAMETER_MM
+CUP_CENTER_SPACING_MM = DEFAULT_CUP_CENTER_SPACING_MM
 
 
 def _build_logger() -> logging.Logger:
@@ -79,39 +87,12 @@ def _sample_dirs(input_dir: Path) -> list[Path]:
 def _grasp_pixel(prediction: Any, polygon: list[list[int]]) -> tuple[int, int]:
     mask = getattr(prediction, "mask", None)
     if mask is not None and np.any(mask):
-        binary = _largest_component_mask((mask > 0).astype(np.uint8))
-        return _mask_center_point(binary)
+        binary = largest_component_mask((mask > 0).astype(np.uint8))
+        return mask_center_point(binary)
 
     points = np.asarray(polygon, dtype=np.float64)
     center = np.round(points.mean(axis=0)).astype(np.int32)
     return int(center[0]), int(center[1])
-
-
-def _largest_component_mask(mask: np.ndarray) -> np.ndarray:
-    binary = (mask > 0).astype(np.uint8)
-    if not np.any(binary):
-        return binary
-    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    if component_count <= 2:
-        return binary
-    largest_label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    return (labels == largest_label).astype(np.uint8)
-
-
-def _mask_center_point(mask: np.ndarray) -> tuple[int, int]:
-    coords_yx = np.column_stack(np.where(mask > 0))
-    if coords_yx.shape[0] == 0:
-        return 0, 0
-    center_xy = coords_yx[:, ::-1].astype(np.float64).mean(axis=0)
-    center_u = int(round(center_xy[0]))
-    center_v = int(round(center_xy[1]))
-    if 0 <= center_v < mask.shape[0] and 0 <= center_u < mask.shape[1] and mask[center_v, center_u] > 0:
-        return center_u, center_v
-
-    coords_xy = coords_yx[:, ::-1].astype(np.float64)
-    distances = np.sum((coords_xy - center_xy) ** 2, axis=1)
-    nearest = coords_xy[int(np.argmin(distances))]
-    return int(round(nearest[0])), int(round(nearest[1]))
 
 
 def _draw_xyz_axes(
@@ -206,6 +187,7 @@ def _classification_debug(prediction: Any) -> dict[str, Any]:
 def _priority_debug(prediction: Any) -> dict[str, Any]:
     if prediction is None:
         return {}
+    footprint = getattr(prediction, "suction_footprint", None)
     return {
         "priority": _finite_float(getattr(prediction, "grasp_priority", None)),
         "support_score": _finite_float(getattr(prediction, "grasp_support_score", None)),
@@ -220,6 +202,7 @@ def _priority_debug(prediction: Any) -> dict[str, Any]:
         "center_distance": _finite_float(getattr(prediction, "grasp_center_distance", None)),
         "depth_candidate": bool(getattr(prediction, "grasp_depth_candidate", False)),
         "valid_depth": bool(getattr(prediction, "grasp_valid_depth", False)),
+        "suction_footprint": footprint if isinstance(footprint, dict) else None,
     }
 
 
@@ -243,56 +226,14 @@ def _draw_grasp_target_label(
     cv2.putText(image, text, origin_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.85, color, 2, cv2.LINE_AA)
 
 
-def _principal_axis_2d(mask: np.ndarray | None) -> np.ndarray:
-    if mask is None or not np.any(mask):
-        return np.array([1.0, 0.0], dtype=np.float64)
-    coords = np.column_stack(np.where(mask > 0))
-    if coords.shape[0] < 2:
-        return np.array([1.0, 0.0], dtype=np.float64)
-    coords_xy = coords[:, ::-1].astype(np.float64)
-    centered = coords_xy - coords_xy.mean(axis=0)
-    covariance = np.cov(centered, rowvar=False)
-    if covariance.shape != (2, 2):
-        return np.array([1.0, 0.0], dtype=np.float64)
-    _, eigenvectors = np.linalg.eigh(covariance)
-    axis = eigenvectors[:, -1]
-    norm = np.linalg.norm(axis)
-    if norm < 1e-9:
-        return np.array([1.0, 0.0], dtype=np.float64)
-    axis = axis / norm
-    if axis[0] < 0.0 or (abs(axis[0]) < 1e-9 and axis[1] < 0.0):
-        axis = -axis
-    return axis
-
-
 def _local_depth_mm(
     depth_image: np.ndarray | None,
     grasp_xy: tuple[int, int],
     mask: np.ndarray | None,
     window: int = 7,
 ) -> float | None:
-    if depth_image is None or depth_image.ndim < 2:
-        return None
     u, v = grasp_xy
-    half = window // 2
-    y1 = max(0, int(v) - half)
-    y2 = min(depth_image.shape[0], int(v) + half + 1)
-    x1 = max(0, int(u) - half)
-    x2 = min(depth_image.shape[1], int(u) + half + 1)
-    patch = depth_image[y1:y2, x1:x2]
-    values = patch[patch > 0]
-
-    if mask is not None and np.any(mask):
-        mask_patch = mask[y1:y2, x1:x2] > 0
-        masked_values = patch[(patch > 0) & mask_patch]
-        if masked_values.size > 0:
-            values = masked_values
-        elif values.size == 0:
-            values = depth_image[(depth_image > 0) & (mask[: depth_image.shape[0], : depth_image.shape[1]] > 0)]
-
-    if values.size == 0:
-        return None
-    return float(np.median(values.astype(np.float64)))
+    return median_valid_depth_at_point(depth_image, u, v, mask, window=window)
 
 
 def _draw_dual_cup_footprint(
@@ -308,20 +249,22 @@ def _draw_dual_cup_footprint(
     if depth_mm is None or depth_mm <= 0 or intrinsic is None:
         return {"drawn": False, "reason": "missing_depth_or_intrinsic"}
 
-    fx = float(intrinsic[0, 0])
-    fy = float(intrinsic[1, 1])
-    focal = (fx + fy) * 0.5
-    radius_px = (CUP_DIAMETER_MM * 0.5) * focal / depth_mm
-    spacing_px = CUP_CENTER_SPACING_MM * focal / depth_mm
-    if not np.isfinite(radius_px) or not np.isfinite(spacing_px):
+    footprint = compute_dual_cup_footprint(
+        mask if mask is not None else np.zeros(image.shape[:2], dtype=np.uint8),
+        grasp_xy,
+        depth_mm,
+        intrinsic,
+        cup_diameter_mm=CUP_DIAMETER_MM,
+        cup_center_spacing_mm=CUP_CENTER_SPACING_MM,
+    )
+    if footprint is None:
         return {"drawn": False, "reason": "invalid_projection"}
 
-    axis = _principal_axis_2d(mask)
-    center = np.asarray(grasp_xy, dtype=np.float64)
-    offset = axis * (spacing_px * 0.5)
-    cup_centers = [center - offset, center + offset]
-    radius_int = max(1, int(round(radius_px)))
-    center_points = [tuple(np.round(c).astype(int).tolist()) for c in cup_centers]
+    radius_int = max(1, int(round(footprint.cup_radius_px)))
+    center_points = [
+        tuple(np.round(point).astype(int).tolist())
+        for point in footprint.cup_centers_xy
+    ]
 
     cv2.line(image, center_points[0], center_points[1], color, 2, cv2.LINE_AA)
     for point in center_points:
@@ -329,16 +272,12 @@ def _draw_dual_cup_footprint(
         cv2.circle(image, point, radius_int, color, 2, cv2.LINE_AA)
         cv2.circle(image, point, 3, color, -1, cv2.LINE_AA)
 
-    return {
+    data = footprint.to_dict()
+    data.update({
         "drawn": True,
-        "depth_mm": depth_mm,
-        "cup_diameter_mm": CUP_DIAMETER_MM,
-        "cup_center_spacing_mm": CUP_CENTER_SPACING_MM,
-        "cup_radius_px": float(radius_px),
-        "cup_center_spacing_px": float(spacing_px),
-        "axis_xy": [float(axis[0]), float(axis[1])],
         "cup_centers_xy": [[int(x), int(y)] for x, y in center_points],
-    }
+    })
+    return data
 
 
 def _render_debug(

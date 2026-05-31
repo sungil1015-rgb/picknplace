@@ -13,7 +13,7 @@
 		{
             "NAME" : "PickNPlace",
             "CONFIG" : "./configs/mask2former.yaml",
-            "WEIGHT" : "facebook/mask2former-swin-base-coco-panoptic",
+            "WEIGHT" : "",
             "SUPPORT" : ["GRPC"],
             "USE_FILE_IO" : "True",
             "OPTIONS" : {
@@ -22,7 +22,7 @@
                 "CLASSIFIER_CONFIG" : "./configs/dinov2.yaml",
                 "PRIORITY_CONFIG" : "./configs/grasp_priority.yaml",
                 "CALIBRATION_CONFIG" : "./configs/calibration.yaml",
-                "SUCTION_NORMAL_WINDOW" : "20"
+                "SUCTION_CONFIG" : "./configs/suction.yaml"
             }
         }
 	]

@@ -97,17 +97,16 @@ def _load_settings(
     post_cfg = _section(config, "postprocess")
 
     configured_checkpoint = str(_required(model_cfg, "checkpoint", "model"))
-    requested_checkpoint = checkpoint_file or configured_checkpoint
     configured_weights = model_cfg.get("weights")
 
     if configured_weights:
-        checkpoint = requested_checkpoint
-        weights = str(configured_weights)
-    elif _looks_like_weights(requested_checkpoint):
         checkpoint = configured_checkpoint
-        weights = str(requested_checkpoint)
+        weights = str(configured_weights)
+    elif _looks_like_weights(checkpoint_file):
+        checkpoint = configured_checkpoint
+        weights = str(checkpoint_file)
     else:
-        checkpoint = requested_checkpoint
+        checkpoint = configured_checkpoint
         weights = None
 
     crop_enabled = bool(_required(crop_cfg, "enabled", "crop"))

@@ -16,6 +16,7 @@ from PIL import Image
 
 
 DEFAULT_FOCAL_TOLERANCE = 10.0
+DEFAULT_SEGMENTATION_ROI_2013 = [150.822, 1186.162, 0.0, 866.0]
 
 CROP_BOX_BY_FOCAL_LENGTH: tuple[tuple[float, tuple[float, float, float, float]], ...] = (
 	(2013.0, (150.822, 0.0, 1186.162, 866.0)),

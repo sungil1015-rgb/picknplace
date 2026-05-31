@@ -122,6 +122,41 @@ def transform_direction(direction_xyz: np.ndarray, transform_4x4: np.ndarray) ->
     return direction / norm
 
 
+def orient_normal_z_up(normal_xyz: np.ndarray) -> np.ndarray:
+    normal = np.asarray(normal_xyz, dtype=np.float64)
+    norm = np.linalg.norm(normal)
+    if norm < 1e-9:
+        return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    normal = normal / norm
+    if normal[2] < 0.0:
+        normal = -normal
+    return normal
+
+
+def project_to_tangent(reference_xyz: np.ndarray, normal_xyz: np.ndarray) -> np.ndarray:
+    normal = np.asarray(normal_xyz, dtype=np.float64)
+    normal_norm = np.linalg.norm(normal)
+    if normal_norm < 1e-9:
+        normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    else:
+        normal = normal / normal_norm
+
+    reference = np.asarray(reference_xyz, dtype=np.float64)
+    tangent = reference - np.dot(reference, normal) * normal
+    tangent_norm = np.linalg.norm(tangent)
+    if tangent_norm >= 1e-9:
+        return tangent / tangent_norm
+
+    fallback = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    if abs(float(np.dot(fallback, normal))) > 0.9:
+        fallback = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    tangent = fallback - np.dot(fallback, normal) * normal
+    tangent_norm = np.linalg.norm(tangent)
+    if tangent_norm < 1e-9:
+        return np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    return tangent / tangent_norm
+
+
 def align_vectors_rotation(source: np.ndarray, target: np.ndarray) -> np.ndarray:
     source = np.asarray(source, dtype=np.float64)
     target = np.asarray(target, dtype=np.float64)

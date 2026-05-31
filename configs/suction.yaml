@@ -1,0 +1,11 @@
+suction:
+  # suction point 주변 depth/normal을 계산할 local window 크기(pixel).
+  depth_window: 5
+  normal_window: 20
+
+  # dual suction cup 실제 규격(mm).
+  cup_diameter_mm: 25.0
+  cup_center_spacing_mm: 35.0
+
+  # 각 cup footprint 원 내부 픽셀 중 mask 안에 들어와야 하는 최소 비율.
+  min_cup_inside_ratio: 0.85
