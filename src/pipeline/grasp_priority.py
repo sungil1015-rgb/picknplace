@@ -6,6 +6,9 @@ from typing import Any, Optional, Sequence
 import cv2
 import numpy as np
 
+from src.utils.depth import valid_depth_values
+from src.utils.mask import erode_mask, mask_boundary
+
 
 @dataclass(frozen=True)
 class GraspPriorityScore:
@@ -181,20 +184,13 @@ class GraspPriorityScorer:
         if not np.any(mask):
             return None
 
-        inner_mask = self._erode_mask(mask)
-        values = self._valid_depth_values(depth_image, inner_mask)
+        inner_mask = erode_mask(mask, self.erosion_kernel)
+        values = valid_depth_values(depth_image, inner_mask)
         if values.size == 0:
-            values = self._valid_depth_values(depth_image, mask)
+            values = valid_depth_values(depth_image, mask)
         if values.size == 0:
             return None
         return float(np.percentile(values.astype(np.float64), self.depth_percentile))
-
-    def _erode_mask(self, mask: np.ndarray) -> np.ndarray:
-        if self.erosion_kernel <= 1:
-            return mask
-        kernel = np.ones((max(1, self.erosion_kernel), max(1, self.erosion_kernel)), dtype=np.uint8)
-        eroded = cv2.erode(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
-        return eroded if np.any(eroded) else mask
 
     def _clearance_score(
         self,
@@ -214,17 +210,12 @@ class GraspPriorityScorer:
 
         free_space = (~other_mask).astype(np.uint8)
         distance = cv2.distanceTransform(free_space, cv2.DIST_L2, 5)
-        boundary = self._mask_boundary(target_mask)
+        boundary = mask_boundary(target_mask)
         if not np.any(boundary):
             boundary = target_mask
         clearance = float(np.percentile(distance[boundary], 10.0))
         score = float(np.clip(clearance / max(self.clearance_max_distance, 1e-6), 0.0, 1.0))
         return score, clearance
-
-    @staticmethod
-    def _mask_boundary(mask: np.ndarray) -> np.ndarray:
-        eroded = cv2.erode(mask.astype(np.uint8), np.ones((3, 3), dtype=np.uint8), iterations=1).astype(bool)
-        return mask & ~eroded
 
     @staticmethod
     def _area_scores(scores: Sequence[GraspPriorityScore]) -> list[float]:
@@ -252,11 +243,6 @@ class GraspPriorityScorer:
                 area_scores[index] = score
             start = end
         return area_scores
-
-    @staticmethod
-    def _valid_depth_values(depth_image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-        values = depth_image[: mask.shape[0], : mask.shape[1]][mask]
-        return values[np.isfinite(values) & (values > 0)]
 
     @staticmethod
     def _center_score(mask: np.ndarray, roi_2d: Optional[Sequence[float]]) -> tuple[float, Optional[float]]:

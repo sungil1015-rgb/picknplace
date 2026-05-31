@@ -23,14 +23,21 @@ import numpy as np
 
 from src.pipeline.grasp_priority import GraspPriorityScorer
 from src.pipeline.suction_pipeline import SuctionPipeline
+from src.utils.crop import DEFAULT_SEGMENTATION_ROI_2013
 from src.utils.geometry import extrinsic_from_translation_and_euler, make_intrinsic, quaternion_to_rotation_matrix
+from src.utils.mask import largest_component_mask, mask_to_polygon
+from src.utils.suction_footprint import (
+    DEFAULT_CUP_CENTER_SPACING_MM,
+    DEFAULT_CUP_DIAMETER_MM,
+    DEFAULT_MIN_CUP_INSIDE_RATIO,
+)
 
 
 class PickNPlace:
     DEFAULT_POLYGON_APPROX_RATIO = 0.005
     DEFAULT_POLYGON_MIN_EPSILON = 0.5
     FIXED_FOCAL_LENGTH = 2013.0
-    FIXED_SEGMENTATION_ROI = [150.822, 1186.162, 0.0, 866.0]
+    FIXED_SEGMENTATION_ROI = DEFAULT_SEGMENTATION_ROI_2013
 
     def __init__(
             self,
@@ -55,10 +62,7 @@ class PickNPlace:
 
         self.detector = self._load_detector()
         self.classifier = self._load_classifier()
-        self.suction_pipeline = SuctionPipeline(
-            depth_window=int(self.options.get("SUCTION_DEPTH_WINDOW", 5)),
-            normal_window=int(self.options.get("SUCTION_NORMAL_WINDOW", 5)),
-        )
+        self.suction_pipeline = self._load_suction_pipeline()
         self.priority_scorer = self._load_priority_scorer()
         if self.detector is None:
             self.logger.info(f"[{self.name}] 더미 모드로 초기화 (detector=None)")
@@ -146,6 +150,44 @@ class PickNPlace:
             self.logger.exception(f"[{self.name}] GraspPriorityScorer 로드 실패: {exc}")
             raise
 
+    def _load_suction_pipeline(self) -> SuctionPipeline:
+        suction_cfg: dict[str, Any] = {}
+        suction_config = self.options.get("SUCTION_CONFIG")
+        if suction_config:
+            try:
+                import yaml
+
+                with open(suction_config, "r", encoding="utf-8") as handle:
+                    config = yaml.safe_load(handle) or {}
+                value = config.get("suction", {})
+                if not isinstance(value, dict):
+                    raise ValueError("suction config section 'suction' must be a mapping")
+                suction_cfg = value
+                self.logger.info(f"[{self.name}] SuctionPipeline config 로드 완료: {suction_config}")
+            except Exception as exc:
+                self.logger.exception(f"[{self.name}] SuctionPipeline config 로드 실패: {exc}")
+                raise
+
+        return SuctionPipeline(
+            depth_window=int(suction_cfg.get("depth_window", self.options.get("SUCTION_DEPTH_WINDOW", 5))),
+            normal_window=int(suction_cfg.get("normal_window", self.options.get("SUCTION_NORMAL_WINDOW", 5))),
+            cup_diameter_mm=float(
+                suction_cfg.get("cup_diameter_mm", self.options.get("SUCTION_CUP_DIAMETER_MM", DEFAULT_CUP_DIAMETER_MM))
+            ),
+            cup_center_spacing_mm=float(
+                suction_cfg.get(
+                    "cup_center_spacing_mm",
+                    self.options.get("SUCTION_CUP_CENTER_SPACING_MM", DEFAULT_CUP_CENTER_SPACING_MM),
+                )
+            ),
+            min_cup_inside_ratio=float(
+                suction_cfg.get(
+                    "min_cup_inside_ratio",
+                    self.options.get("SUCTION_MIN_CUP_INSIDE_RATIO", DEFAULT_MIN_CUP_INSIDE_RATIO),
+                )
+            ),
+        )
+
     def _load_extrinsic(self) -> np.ndarray:
         calibration_config = self.options.get("CALIBRATION_CONFIG")
         if not calibration_config:
@@ -191,31 +233,6 @@ class PickNPlace:
     def set_intrinsic(self, cx: float, cy: float, fx: float, fy: float) -> None:
         """카메라 intrinsic을 반영하되 focal length는 2013으로 고정."""
         self.c_matrix = make_intrinsic(cx, cy, self.FIXED_FOCAL_LENGTH, self.FIXED_FOCAL_LENGTH)
-
-    def _mask_to_polygon(self, mask: np.ndarray) -> List[List[int]]:
-        binary_mask = (mask > 0).astype(np.uint8) * 255
-        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        if not contours:
-            return []
-        contour = max(contours, key=cv2.contourArea)
-        perimeter = cv2.arcLength(contour, True)
-        epsilon = max(self.polygon_min_epsilon, perimeter * self.polygon_approx_ratio)
-        polygon = cv2.approxPolyDP(contour, epsilon, True)
-        if polygon.shape[0] < 3:
-            x, y, w, h = cv2.boundingRect(contour)
-            polygon = np.array([[[x, y]], [[x + w, y]], [[x + w, y + h]], [[x, y + h]]], dtype=np.int32)
-        return polygon.reshape(-1, 2).astype(int).tolist()
-
-    @staticmethod
-    def _largest_component_mask(mask: np.ndarray) -> Optional[np.ndarray]:
-        binary_mask = (mask > 0).astype(np.uint8)
-        if not np.any(binary_mask):
-            return None
-        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
-        if component_count <= 1:
-            return None
-        largest_label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-        return labels == largest_label
 
     def _resolve_segmentation_roi(
             self,
@@ -298,11 +315,11 @@ class PickNPlace:
         for prediction in predictions:
             if prediction.mask is None:
                 continue
-            mask = self._largest_component_mask(prediction.mask)
+            mask = largest_component_mask(prediction.mask, empty_as_none=True)
             if mask is None:
                 continue
             prediction.mask = mask
-            polygon = self._mask_to_polygon(mask)
+            polygon = mask_to_polygon(mask, self.polygon_approx_ratio, self.polygon_min_epsilon)
             if not polygon:
                 continue
             polygons.append(polygon)
