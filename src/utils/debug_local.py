@@ -203,6 +203,7 @@ def _priority_debug(prediction: Any) -> dict[str, Any]:
         "depth_candidate": bool(getattr(prediction, "grasp_depth_candidate", False)),
         "valid_depth": bool(getattr(prediction, "grasp_valid_depth", False)),
         "suction_footprint": footprint if isinstance(footprint, dict) else None,
+        "suction_candidates": list(getattr(prediction, "suction_candidates", []) or []),
     }
 
 

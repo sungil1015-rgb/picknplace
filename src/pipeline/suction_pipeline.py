@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
+import cv2
 import numpy as np
 
 from src.utils.geometry import (
@@ -33,12 +34,18 @@ class SuctionPipeline:
         cup_diameter_mm: float = DEFAULT_CUP_DIAMETER_MM,
         cup_center_spacing_mm: float = DEFAULT_CUP_CENTER_SPACING_MM,
         min_cup_inside_ratio: float = DEFAULT_MIN_CUP_INSIDE_RATIO,
+        candidate_count: int = 12,
+        candidate_min_distance_px: float = 20.0,
+        pca_offset_px: float = 25.0,
     ) -> None:
         self.depth_window = depth_window
         self.normal_window = normal_window
         self.cup_diameter_mm = float(cup_diameter_mm)
         self.cup_center_spacing_mm = float(cup_center_spacing_mm)
         self.min_cup_inside_ratio = float(min_cup_inside_ratio)
+        self.candidate_count = int(candidate_count)
+        self.candidate_min_distance_px = float(candidate_min_distance_px)
+        self.pca_offset_px = float(pca_offset_px)
 
     def compute(
         self,
@@ -56,11 +63,13 @@ class SuctionPipeline:
             mask = getattr(instance, "mask", None)
             if mask is None:
                 setattr(instance, "suction_footprint", None)
+                setattr(instance, "suction_candidates", [])
                 suction_points.append([])
                 continue
 
-            point, footprint = self._compute_one(mask, depth_image, normal_image, intrinsic, extrinsic)
+            point, footprint, candidates = self._compute_one(mask, depth_image, normal_image, intrinsic, extrinsic)
             setattr(instance, "suction_footprint", footprint.to_dict() if footprint is not None else None)
+            setattr(instance, "suction_candidates", candidates)
             suction_points.append([point] if point is not None else [])
         return suction_points
 
@@ -71,17 +80,21 @@ class SuctionPipeline:
         normal_image: np.ndarray | None,
         intrinsic: np.ndarray,
         extrinsic: np.ndarray,
-    ) -> tuple[list[list[float]] | None, SuctionFootprint | None]:
+    ) -> tuple[list[list[float]] | None, SuctionFootprint | None, list[dict[str, Any]]]:
         binary_mask = (mask > 0).astype(np.uint8)
         binary_mask = largest_component_mask(binary_mask)
         if not np.any(binary_mask):
-            return None, None
+            return None, None, []
 
-        u, v = mask_center_point(binary_mask)
+        candidates = self._generate_suction_candidates(binary_mask)
+        if not candidates:
+            return None, None, []
+
+        u, v = candidates[0]["xy"]
 
         depth_mm = median_valid_depth_at_point(depth_image, u, v, binary_mask, window=self.depth_window)
         if depth_mm is None:
-            return None, None
+            return None, None, candidates
 
         footprint = compute_dual_cup_footprint(
             binary_mask,
@@ -108,7 +121,88 @@ class SuctionPipeline:
         return [
             [round(float(value), 3) for value in point_robot],
             [round(float(value), 6) for value in quaternion],
-        ], footprint
+        ], footprint, candidates
+
+    def _generate_suction_candidates(self, mask: np.ndarray) -> list[dict[str, Any]]:
+        max_count = max(1, self.candidate_count)
+        min_dist_sq = max(0.0, self.candidate_min_distance_px) ** 2
+        candidates: list[dict[str, Any]] = []
+
+        def add_candidate(u: int, v: int, source: str) -> bool:
+            if len(candidates) >= max_count:
+                return False
+            if not (0 <= v < mask.shape[0] and 0 <= u < mask.shape[1]):
+                return False
+            if not bool(mask[v, u]):
+                return False
+            for candidate in candidates:
+                prev_u, prev_v = candidate["xy"]
+                if (u - prev_u) ** 2 + (v - prev_v) ** 2 < min_dist_sq:
+                    return False
+            candidates.append({"xy": [int(u), int(v)], "source": source})
+            return True
+
+        center_u, center_v = mask_center_point(mask)
+        add_candidate(center_u, center_v, "mask_center")
+
+        distance = cv2.distanceTransform((mask > 0).astype(np.uint8), cv2.DIST_L2, 5)
+        self._add_pca_offset_candidates(mask, distance, center_u, center_v, add_candidate)
+        self._add_distance_transform_candidates(distance, add_candidate, lambda: len(candidates) < max_count)
+        return candidates[:max_count]
+
+    def _add_distance_transform_candidates(self, distance: np.ndarray, add_candidate: Any, has_capacity: Any) -> None:
+        if not np.any(distance > 0):
+            return
+        for flat_index in np.argsort(distance.ravel())[::-1]:
+            if not has_capacity():
+                break
+            y, x = np.unravel_index(int(flat_index), distance.shape)
+            if distance[y, x] <= 0:
+                break
+            add_candidate(int(x), int(y), "distance_transform")
+
+    def _add_pca_offset_candidates(
+        self,
+        mask: np.ndarray,
+        distance: np.ndarray,
+        center_u: int,
+        center_v: int,
+        add_candidate: Any,
+    ) -> None:
+        axis = principal_axis_2d(mask)
+        orthogonal = np.array([-axis[1], axis[0]], dtype=np.float64)
+        center_clearance = float(distance[center_v, center_u]) if distance.size else 0.0
+        offset = self.pca_offset_px
+        if center_clearance > 0.0:
+            offset = min(offset, max(5.0, center_clearance * 0.8))
+        if offset <= 0.0:
+            return
+
+        for source, direction in (
+            ("pca_long_axis", axis),
+            ("pca_long_axis", -axis),
+            ("pca_short_axis", orthogonal),
+            ("pca_short_axis", -orthogonal),
+        ):
+            point = np.array([center_u, center_v], dtype=np.float64) + direction * offset
+            u = int(round(float(point[0])))
+            v = int(round(float(point[1])))
+            if 0 <= v < mask.shape[0] and 0 <= u < mask.shape[1] and bool(mask[v, u]):
+                add_candidate(u, v, source)
+                continue
+            nearest = self._nearest_mask_point(mask, point)
+            if nearest is not None:
+                add_candidate(nearest[0], nearest[1], source)
+
+    @staticmethod
+    def _nearest_mask_point(mask: np.ndarray, point_xy: np.ndarray) -> tuple[int, int] | None:
+        coords_yx = np.column_stack(np.where(mask > 0))
+        if coords_yx.shape[0] == 0:
+            return None
+        coords_xy = coords_yx[:, ::-1].astype(np.float64)
+        distances = np.sum((coords_xy - point_xy.reshape(2)) ** 2, axis=1)
+        nearest = coords_xy[int(np.argmin(distances))]
+        return int(round(float(nearest[0]))), int(round(float(nearest[1])))
 
     def _principal_reference_camera(
         self,

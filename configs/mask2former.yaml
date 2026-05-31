@@ -5,9 +5,9 @@ input:
   size: [866, 1035]
 crop:
   enabled: true
-  tolerance: 1.0
+  tolerance: 0.0
 postprocess:
   prediction_threshold: 0.7
-  mask_threshold: 0.7
-  overlap_threshold: 0.8
+  mask_threshold: 0.8
+  overlap_threshold: 0.2
   min_instance_area: 1200.0
