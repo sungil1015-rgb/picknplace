@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# Editor / OS
+*.bak
+*.swp
+~$*
+.DS_Store
+Thumbs.db
+
+# Dataset / outputs (직접 배치 — repo 추적 대상 아님)
+/data/
+/outputs/
+runs/
+
+# Model weights / checkpoints
+*.pt
+*.onnx
+*.ply
+
+# Local user settings
+.label_tool_state.json
