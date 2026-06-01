@@ -27,9 +27,6 @@ def local_mean_normal(
     window: int,
 ) -> np.ndarray | None:
     normals, valid = normalize_normal_image(normal_image)
-    if 0 <= int(v) < normals.shape[0] and 0 <= int(u) < normals.shape[1] and bool(mask[int(v), int(u)]) and bool(valid[int(v), int(u)]):
-        return normals[int(v), int(u)]
-
     half = max(0, int(window) // 2)
     y1 = max(0, int(v) - half)
     y2 = min(normals.shape[0], int(v) + half + 1)
@@ -37,9 +34,13 @@ def local_mean_normal(
     x2 = min(normals.shape[1], int(u) + half + 1)
 
     region = (mask[y1:y2, x1:x2] > 0) & valid[y1:y2, x1:x2]
-    if not np.any(region):
+    if np.any(region):
+        values = normals[y1:y2, x1:x2][region]
+    elif 0 <= int(v) < normals.shape[0] and 0 <= int(u) < normals.shape[1] and bool(mask[int(v), int(u)]) and bool(valid[int(v), int(u)]):
+        values = normals[int(v) : int(v) + 1, int(u) : int(u) + 1].reshape(1, 3)
+    else:
         return None
-    values = normals[y1:y2, x1:x2][region]
+
     normal = values.mean(axis=0)
     norm = np.linalg.norm(normal)
     if norm < 1e-6:

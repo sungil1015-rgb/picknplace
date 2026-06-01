@@ -130,6 +130,9 @@ def _draw_xyz_axes(
     image: np.ndarray,
     anchor: tuple[int, int],
     quaternion_xyzw: Any,
+    intrinsic: np.ndarray | None = None,
+    extrinsic: np.ndarray | None = None,
+    origin_robot_xyz: Any = None,
     scale: int = 36,
 ) -> None:
     quaternion = np.asarray(quaternion_xyzw, dtype=np.float64).reshape(4)
@@ -139,14 +142,69 @@ def _draw_xyz_axes(
     colors = [(0, 0, 255), (0, 180, 0), (255, 0, 0)]
     labels = ["X", "Y", "Z"]
     for axis, color, label in zip(rotation.T, colors, labels):
-        direction = np.asarray([axis[0], axis[1]], dtype=np.float64)
-        norm = np.linalg.norm(direction)
-        if norm < 1e-9:
-            continue
-        end = origin + np.round(direction / norm * scale).astype(np.int32)
-        end_xy = (int(end[0]), int(end[1]))
-        cv2.arrowedLine(image, tuple(origin), end_xy, color, 2, cv2.LINE_AA, tipLength=0.25)
+        projected = _project_robot_axis(anchor, axis, intrinsic, extrinsic, origin_robot_xyz, scale_mm=float(scale))
+        if projected is None:
+            direction = np.asarray([axis[0], axis[1]], dtype=np.float64)
+            norm = np.linalg.norm(direction)
+            if norm < 1e-9:
+                continue
+            end = origin + np.round(direction / norm * scale).astype(np.int32)
+            origin_xy = tuple(origin)
+            end_xy = (int(end[0]), int(end[1]))
+        else:
+            origin_xy, end_xy = projected
+        cv2.arrowedLine(image, origin_xy, end_xy, color, 2, cv2.LINE_AA, tipLength=0.25)
         cv2.putText(image, label, end_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2, cv2.LINE_AA)
+
+
+def _project_robot_axis(
+    anchor: tuple[int, int],
+    axis_robot: np.ndarray,
+    intrinsic: np.ndarray | None,
+    extrinsic: np.ndarray | None,
+    origin_robot_xyz: Any,
+    scale_mm: float,
+) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    if intrinsic is None or extrinsic is None or origin_robot_xyz is None:
+        return None
+    try:
+        origin_robot = np.asarray(origin_robot_xyz, dtype=np.float64).reshape(3)
+        axis = np.asarray(axis_robot, dtype=np.float64).reshape(3)
+    except (TypeError, ValueError):
+        return None
+    axis_norm = np.linalg.norm(axis)
+    if axis_norm < 1e-9:
+        return None
+
+    camera_from_robot = np.linalg.inv(np.asarray(extrinsic, dtype=np.float64))
+    origin_camera = _transform_robot_point_to_camera(origin_robot, camera_from_robot)
+    end_camera = _transform_robot_point_to_camera(origin_robot + (axis / axis_norm) * scale_mm, camera_from_robot)
+    origin_xy = _project_camera_point(origin_camera, intrinsic)
+    end_xy = _project_camera_point(end_camera, intrinsic)
+    if origin_xy is None or end_xy is None:
+        return None
+    if np.sum((np.asarray(origin_xy) - np.asarray(anchor)) ** 2) > 30.0 ** 2:
+        offset = np.asarray(anchor, dtype=np.int32) - np.asarray(origin_xy, dtype=np.int32)
+        end_xy = tuple((np.asarray(end_xy, dtype=np.int32) + offset).tolist())
+        origin_xy = (int(anchor[0]), int(anchor[1]))
+    return origin_xy, end_xy
+
+
+def _transform_robot_point_to_camera(point_robot: np.ndarray, camera_from_robot: np.ndarray) -> np.ndarray:
+    point_h = np.ones(4, dtype=np.float64)
+    point_h[:3] = point_robot
+    return (camera_from_robot @ point_h)[:3]
+
+
+def _project_camera_point(point_camera: np.ndarray, intrinsic: np.ndarray) -> tuple[int, int] | None:
+    z = float(point_camera[2])
+    if abs(z) < 1e-9:
+        return None
+    u = (float(point_camera[0]) * float(intrinsic[0, 0]) / z) + float(intrinsic[0, 2])
+    v = (float(point_camera[1]) * float(intrinsic[1, 1]) / z) + float(intrinsic[1, 2])
+    if not np.isfinite(u) or not np.isfinite(v):
+        return None
+    return int(round(u)), int(round(v))
 
 
 def _class_color(class_id: Any) -> tuple[int, int, int]:
@@ -290,7 +348,7 @@ def _draw_dual_cup_footprint(
                 if isinstance(point, list) and len(point) == 2
             ]
             if len(center_points) == 2:
-                cv2.line(image, center_points[0], center_points[1], color, 2, cv2.LINE_AA)
+                cv2.line(image, center_points[0], center_points[1], (0, 255, 0), 2, cv2.LINE_AA)
                 for point in center_points:
                     cv2.circle(image, point, radius_int, (255, 255, 255), 4, cv2.LINE_AA)
                     cv2.circle(image, point, radius_int, color, 2, cv2.LINE_AA)
@@ -326,7 +384,7 @@ def _draw_dual_cup_footprint(
         for point in footprint.cup_centers_xy
     ]
 
-    cv2.line(image, center_points[0], center_points[1], color, 2, cv2.LINE_AA)
+    cv2.line(image, center_points[0], center_points[1], (0, 255, 0), 2, cv2.LINE_AA)
     for point in center_points:
         cv2.circle(image, point, radius_int, (255, 255, 255), 4, cv2.LINE_AA)
         cv2.circle(image, point, radius_int, color, 2, cv2.LINE_AA)
@@ -344,6 +402,7 @@ def _render_debug(
     image: np.ndarray,
     depth_image: np.ndarray | None,
     intrinsic: np.ndarray | None,
+    extrinsic: np.ndarray | None,
     result: dict[str, Any],
     predictions: list[Any],
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
@@ -397,7 +456,7 @@ def _render_debug(
             point = point_list[0]
             if isinstance(point, (list, tuple)) and len(point) >= 2:
                 grasp_xyz = point[0]
-                _draw_xyz_axes(overlay, grasp_xy, point[1])
+                _draw_xyz_axes(overlay, grasp_xy, point[1], intrinsic=intrinsic, extrinsic=extrinsic, origin_robot_xyz=grasp_xyz)
 
         if not is_grasp_target:
             _draw_class_label(overlay, class_id, tuple(points[0].tolist()), color)
@@ -425,11 +484,12 @@ def _save_debug_result(
     image: np.ndarray,
     depth_image: np.ndarray | None,
     intrinsic: np.ndarray | None,
+    extrinsic: np.ndarray | None,
     result: dict[str, Any],
     predictions: list[Any],
 ) -> None:
     relative_name = "_".join(sample_dir.parts[-2:]) if len(sample_dir.parts) >= 2 else sample_dir.name
-    overlay, summaries = _render_debug(image, depth_image, intrinsic, result, predictions)
+    overlay, summaries = _render_debug(image, depth_image, intrinsic, extrinsic, result, predictions)
 
     output_root.mkdir(parents=True, exist_ok=True)
     image_path = output_root / f"{relative_name}_debug.png"
@@ -496,7 +556,7 @@ def run_debug(args: argparse.Namespace) -> None:
         run_elapsed = time.perf_counter() - run_start
 
         save_start = time.perf_counter()
-        _save_debug_result(sample_dir, Path(args.output), image, depth, model.c_matrix, result, predictions)
+        _save_debug_result(sample_dir, Path(args.output), image, depth, model.c_matrix, model.extrinsic, result, predictions)
         save_elapsed = time.perf_counter() - save_start
         total_elapsed = time.perf_counter() - sample_start
 

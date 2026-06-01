@@ -149,11 +149,20 @@ class SuctionPipeline:
         point_camera = pixel_to_camera(u, v, depth_mm, intrinsic)
         point_robot = transform_point(point_camera, extrinsic)
 
-        normal_camera = self._mean_valid_normal(normal_image, u, v, binary_mask)
+        normal_camera = self._selected_surface_normal(surface_debug, normal_image, u, v, binary_mask)
         normal_robot = transform_normal(normal_camera, extrinsic)
         normal_robot = orient_normal_z_up(normal_robot)
 
-        reference_camera = self._principal_reference_camera(binary_mask, u, v, depth_mm, intrinsic, point_camera)
+        reference_camera = self._selected_surface_reference_camera(
+            surface_debug,
+            binary_mask,
+            u,
+            v,
+            depth_mm,
+            intrinsic,
+            point_camera,
+            normal_camera,
+        )
         reference_robot = transform_direction(reference_camera, extrinsic)
         reference_robot = project_to_tangent(reference_robot, normal_robot)
         quaternion = approach_and_reference_to_quaternion(normal_robot, reference_robot)
@@ -220,6 +229,7 @@ class SuctionPipeline:
 
             footprint, suction_area = self._compute_surface_footprint(
                 mask,
+                surface,
                 (u, v),
                 depth_mm,
                 intrinsic,
@@ -303,11 +313,14 @@ class SuctionPipeline:
     def _compute_surface_footprint(
         self,
         mask: np.ndarray,
+        surface: np.ndarray,
         center_xy: tuple[int, int],
         depth_mm: float,
         intrinsic: np.ndarray,
         surface_debug: dict[str, Any],
     ) -> tuple[SuctionFootprint | None, np.ndarray | None]:
+        axis_xy, axis_debug = self._surface_axis_or_fallback(mask, surface)
+        surface_debug.update(axis_debug)
         seed_normal = surface_debug.get("seed_normal")
         if isinstance(seed_normal, list) and len(seed_normal) == 3:
             footprint, suction_area = compute_projected_dual_cup_footprint(
@@ -319,6 +332,7 @@ class SuctionPipeline:
                 cup_diameter_mm=self.cup_diameter_mm,
                 cup_center_spacing_mm=self.cup_center_spacing_mm,
                 min_cup_inside_ratio=self.min_cup_inside_ratio,
+                axis_xy=axis_xy,
             )
             if footprint is not None and suction_area is not None:
                 surface_debug["footprint_projection"] = "normal_projected_ellipse"
@@ -332,9 +346,97 @@ class SuctionPipeline:
             cup_diameter_mm=self.cup_diameter_mm,
             cup_center_spacing_mm=self.cup_center_spacing_mm,
             min_cup_inside_ratio=self.min_cup_inside_ratio,
+            axis_xy=axis_xy,
         )
         surface_debug["footprint_projection"] = "fronto_parallel_fallback"
         return footprint, None
+
+    @staticmethod
+    def _surface_axis_or_fallback(mask: np.ndarray, surface: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+        rect_axis, rect_ratio, rect_area = SuctionPipeline._min_area_rect_axis(surface)
+        if rect_axis is not None and rect_area >= 20 and rect_ratio >= 1.2:
+            return rect_axis, {
+                "footprint_axis_source": "normal_surface_min_area_rect",
+                "footprint_axis_xy": [float(rect_axis[0]), float(rect_axis[1])],
+                "footprint_axis_rect_ratio": float(rect_ratio),
+                "footprint_axis_area": int(rect_area),
+            }
+
+        axis, ratio, area = SuctionPipeline._principal_axis_with_ratio(surface)
+        if area >= 20 and ratio >= 2.5:
+            return axis, {
+                "footprint_axis_source": "normal_surface_pca_fallback",
+                "footprint_axis_xy": [float(axis[0]), float(axis[1])],
+                "footprint_axis_eigen_ratio": float(ratio),
+                "footprint_axis_area": int(area),
+            }
+
+        fallback = principal_axis_2d(mask)
+        return fallback, {
+            "footprint_axis_source": "object_mask_fallback",
+            "footprint_axis_xy": [float(fallback[0]), float(fallback[1])],
+            "footprint_axis_eigen_ratio": float(ratio),
+            "footprint_axis_rect_ratio": float(rect_ratio),
+            "footprint_axis_area": int(area),
+        }
+
+    @staticmethod
+    def _min_area_rect_axis(mask: np.ndarray | None) -> tuple[np.ndarray | None, float, int]:
+        if mask is None or not np.any(mask):
+            return None, 1.0, 0
+        binary = (mask > 0).astype(np.uint8)
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None, 1.0, int(np.count_nonzero(binary))
+        contour = max(contours, key=cv2.contourArea)
+        if contour.shape[0] < 3:
+            return None, 1.0, int(np.count_nonzero(binary))
+
+        (_, _), (width, height), angle = cv2.minAreaRect(contour)
+        long_side = max(float(width), float(height))
+        short_side = max(min(float(width), float(height)), 1e-6)
+        if long_side < 1e-6:
+            return None, 1.0, int(np.count_nonzero(binary))
+
+        angle_rad = np.deg2rad(float(angle))
+        if width >= height:
+            axis = np.array([np.cos(angle_rad), np.sin(angle_rad)], dtype=np.float64)
+        else:
+            axis = np.array([-np.sin(angle_rad), np.cos(angle_rad)], dtype=np.float64)
+        norm = np.linalg.norm(axis)
+        if norm < 1e-9:
+            return None, 1.0, int(np.count_nonzero(binary))
+        axis = axis / norm
+        if axis[0] < 0.0 or (abs(axis[0]) < 1e-9 and axis[1] < 0.0):
+            axis = -axis
+        return axis, float(long_side / short_side), int(np.count_nonzero(binary))
+
+    @staticmethod
+    def _principal_axis_with_ratio(mask: np.ndarray | None) -> tuple[np.ndarray, float, int]:
+        if mask is None or not np.any(mask):
+            return np.array([1.0, 0.0], dtype=np.float64), 1.0, 0
+        coords = np.column_stack(np.where(mask > 0))
+        area = int(coords.shape[0])
+        if area < 2:
+            return np.array([1.0, 0.0], dtype=np.float64), 1.0, area
+
+        coords_xy = coords[:, ::-1].astype(np.float64)
+        centered = coords_xy - coords_xy.mean(axis=0)
+        covariance = np.cov(centered, rowvar=False)
+        if covariance.shape != (2, 2):
+            return np.array([1.0, 0.0], dtype=np.float64), 1.0, area
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        major = max(float(eigenvalues[-1]), 1e-9)
+        minor = max(float(eigenvalues[0]), 1e-9)
+        axis = eigenvectors[:, -1]
+        norm = np.linalg.norm(axis)
+        if norm < 1e-9:
+            axis = np.array([1.0, 0.0], dtype=np.float64)
+        else:
+            axis = axis / norm
+        if axis[0] < 0.0 or (abs(axis[0]) < 1e-9 and axis[1] < 0.0):
+            axis = -axis
+        return axis, float(major / minor), area
 
     def _generate_suction_candidates(self, mask: np.ndarray) -> list[dict[str, Any]]:
         max_count = max(1, self.candidate_count)
@@ -355,13 +457,23 @@ class SuctionPipeline:
             candidates.append({"xy": [int(u), int(v)], "source": source})
             return True
 
+        distance = cv2.distanceTransform((mask > 0).astype(np.uint8), cv2.DIST_L2, 5)
+        self._add_best_distance_transform_candidate(distance, add_candidate)
+
         center_u, center_v = mask_center_point(mask)
         add_candidate(center_u, center_v, "mask_center")
 
-        distance = cv2.distanceTransform((mask > 0).astype(np.uint8), cv2.DIST_L2, 5)
         self._add_pca_offset_candidates(mask, distance, center_u, center_v, add_candidate)
         self._add_distance_transform_candidates(distance, add_candidate, lambda: len(candidates) < max_count)
         return candidates[:max_count]
+
+    def _add_best_distance_transform_candidate(self, distance: np.ndarray, add_candidate: Any) -> None:
+        if not np.any(distance > 0):
+            return
+        flat_index = int(np.argmax(distance))
+        y, x = np.unravel_index(flat_index, distance.shape)
+        if distance[y, x] > 0:
+            add_candidate(int(x), int(y), "distance_transform")
 
     def _add_distance_transform_candidates(self, distance: np.ndarray, add_candidate: Any, has_capacity: Any) -> None:
         if not np.any(distance > 0):
@@ -439,6 +551,98 @@ class SuctionPipeline:
         if norm < 1e-9:
             return np.array([1.0, 0.0, 0.0], dtype=np.float64)
         return reference_camera / norm
+
+    def _selected_surface_reference_camera(
+        self,
+        surface_debug: dict[str, Any] | None,
+        mask: np.ndarray,
+        u: int,
+        v: int,
+        depth_mm: float,
+        intrinsic: np.ndarray,
+        center_camera: np.ndarray,
+        normal_camera: np.ndarray,
+    ) -> np.ndarray:
+        if isinstance(surface_debug, dict):
+            axis = surface_debug.get("footprint_axis_xy")
+            if isinstance(axis, list) and len(axis) == 2:
+                reference = self._short_axis_reference_camera(axis, u, v, depth_mm, intrinsic, center_camera, normal_camera)
+                if reference is not None:
+                    return reference
+        long_reference = self._principal_reference_camera(mask, u, v, depth_mm, intrinsic, center_camera)
+        short_reference = self._short_reference_from_long(long_reference, normal_camera)
+        return short_reference if short_reference is not None else long_reference
+
+    def _short_axis_reference_camera(
+        self,
+        axis_xy: Any,
+        u: int,
+        v: int,
+        depth_mm: float,
+        intrinsic: np.ndarray,
+        center_camera: np.ndarray,
+        normal_camera: np.ndarray,
+    ) -> np.ndarray | None:
+        long_reference = self._axis_reference_camera(axis_xy, u, v, depth_mm, intrinsic, center_camera)
+        if long_reference is None:
+            return None
+        return self._short_reference_from_long(long_reference, normal_camera)
+
+    @staticmethod
+    def _short_reference_from_long(long_reference: np.ndarray, normal_camera: np.ndarray) -> np.ndarray | None:
+        long_axis = np.asarray(long_reference, dtype=np.float64).reshape(3)
+        long_norm = float(np.linalg.norm(long_axis))
+        normal = np.asarray(normal_camera, dtype=np.float64).reshape(3)
+        normal_norm = float(np.linalg.norm(normal))
+        if long_norm < 1e-9 or normal_norm < 1e-9:
+            return None
+        long_axis = long_axis / long_norm
+        normal = normal / normal_norm
+        short_axis = np.cross(long_axis, normal)
+        short_norm = float(np.linalg.norm(short_axis))
+        if short_norm < 1e-9:
+            return None
+        return short_axis / short_norm
+
+    def _axis_reference_camera(
+        self,
+        axis_xy: Any,
+        u: int,
+        v: int,
+        depth_mm: float,
+        intrinsic: np.ndarray,
+        center_camera: np.ndarray,
+    ) -> np.ndarray | None:
+        axis = np.asarray(axis_xy, dtype=np.float64).reshape(2)
+        norm = float(np.linalg.norm(axis))
+        if norm < 1e-9:
+            return None
+        axis = axis / norm
+        step = max(5.0, float(self.normal_window))
+        u_ref = int(round(float(u) + axis[0] * step))
+        v_ref = int(round(float(v) + axis[1] * step))
+        reference_camera = pixel_to_camera(u_ref, v_ref, depth_mm, intrinsic) - center_camera
+        ref_norm = float(np.linalg.norm(reference_camera))
+        if ref_norm < 1e-9:
+            return None
+        return reference_camera / ref_norm
+
+    def _selected_surface_normal(
+        self,
+        surface_debug: dict[str, Any] | None,
+        normal_image: np.ndarray | None,
+        u: int,
+        v: int,
+        mask: np.ndarray,
+    ) -> np.ndarray:
+        if isinstance(surface_debug, dict):
+            seed_normal = surface_debug.get("seed_normal")
+            if isinstance(seed_normal, list) and len(seed_normal) == 3:
+                normal = np.asarray(seed_normal, dtype=np.float64).reshape(3)
+                norm = float(np.linalg.norm(normal))
+                if norm >= 1e-9:
+                    return normal / norm
+        return self._mean_valid_normal(normal_image, u, v, mask)
 
     def _median_valid_depth_depthless(self, fallback_depth: float, mask: np.ndarray, u: int, v: int) -> float:
         half = self.depth_window // 2
