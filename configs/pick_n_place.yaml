@@ -1,6 +1,8 @@
 pipeline:
   fixed_focal_length: 2013.0
+  use_fixed_focal_length: true
   segmentation_roi: [150.822, 1186.162, 0.0, 866.0]
+  roi_source: config
 
 polygon:
   approx_ratio: 0.005

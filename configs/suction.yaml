@@ -4,10 +4,12 @@ suction:
   normal_window: 20
 
   # 후보점 생성:
-  # 1) mask center, 2) PCA long/short axis offset, 3) distance transform 상위점.
+  # 1) distance transform 최고점, 2) mask center, 3) PCA long/short axis offset, 4) distance transform 상위점.
   candidate_count: 12
   candidate_min_distance_px: 20.0
   pca_offset_px: 25.0
+  candidate_min_offset_px: 5.0
+  candidate_clearance_offset_ratio: 0.8
 
   # dual suction cup 실제 규격(mm).
   cup_diameter_mm: 25.0
@@ -27,3 +29,9 @@ suction:
   # 실패하면 다음 suction candidate seed의 normal surface를 다시 평가한다.
   min_suction_area_object_coverage: 0.9
   min_suction_area_surface_coverage: 0.5
+
+  # normal surface의 장축을 구할 때 minAreaRect를 우선 사용하고, 불안정하면 PCA/object mask로 fallback한다.
+  axis_min_area_px: 20
+  axis_min_rect_ratio: 1.2
+  axis_min_pca_ratio: 2.5
+  axis_reference_step_px: 20.0

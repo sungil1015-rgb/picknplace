@@ -23,15 +23,11 @@ from src.utils.depth import median_valid_depth_at_point
 from src.utils.geometry import quaternion_to_rotation_matrix
 from src.utils.mask import largest_component_mask, mask_center_point
 from src.utils.suction_footprint import (
-    DEFAULT_CUP_CENTER_SPACING_MM,
-    DEFAULT_CUP_DIAMETER_MM,
     compute_dual_cup_footprint,
 )
 
 
 DEBUG_ROI_2013 = DEFAULT_SEGMENTATION_ROI_2013
-CUP_DIAMETER_MM = DEFAULT_CUP_DIAMETER_MM
-CUP_CENTER_SPACING_MM = DEFAULT_CUP_CENTER_SPACING_MM
 
 
 def _build_logger() -> logging.Logger:
@@ -322,7 +318,7 @@ def _local_depth_mm(
     depth_image: np.ndarray | None,
     grasp_xy: tuple[int, int],
     mask: np.ndarray | None,
-    window: int = 7,
+    window: int,
 ) -> float | None:
     u, v = grasp_xy
     return median_valid_depth_at_point(depth_image, u, v, mask, window=window)
@@ -335,6 +331,7 @@ def _draw_dual_cup_footprint(
     depth_image: np.ndarray | None,
     intrinsic: np.ndarray | None,
     color: tuple[int, int, int],
+    suction_pipeline: Any | None,
 ) -> dict[str, Any]:
     stored_footprint = getattr(prediction, "suction_footprint", None) if prediction is not None else None
     if isinstance(stored_footprint, dict):
@@ -363,17 +360,22 @@ def _draw_dual_cup_footprint(
                 return data
 
     mask = getattr(prediction, "mask", None) if prediction is not None else None
-    depth_mm = _local_depth_mm(depth_image, grasp_xy, mask)
+    depth_window = int(getattr(suction_pipeline, "depth_window", 7))
+    depth_mm = _local_depth_mm(depth_image, grasp_xy, mask, window=depth_window)
     if depth_mm is None or depth_mm <= 0 or intrinsic is None:
         return {"drawn": False, "reason": "missing_depth_or_intrinsic"}
 
+    cup_diameter_mm = float(getattr(suction_pipeline, "cup_diameter_mm", 25.0))
+    cup_center_spacing_mm = float(getattr(suction_pipeline, "cup_center_spacing_mm", 35.0))
+    min_cup_inside_ratio = float(getattr(suction_pipeline, "min_cup_inside_ratio", 0.85))
     footprint = compute_dual_cup_footprint(
         mask if mask is not None else np.zeros(image.shape[:2], dtype=np.uint8),
         grasp_xy,
         depth_mm,
         intrinsic,
-        cup_diameter_mm=CUP_DIAMETER_MM,
-        cup_center_spacing_mm=CUP_CENTER_SPACING_MM,
+        cup_diameter_mm=cup_diameter_mm,
+        cup_center_spacing_mm=cup_center_spacing_mm,
+        min_cup_inside_ratio=min_cup_inside_ratio,
     )
     if footprint is None:
         return {"drawn": False, "reason": "invalid_projection"}
@@ -405,6 +407,7 @@ def _render_debug(
     extrinsic: np.ndarray | None,
     result: dict[str, Any],
     predictions: list[Any],
+    suction_pipeline: Any | None,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     overlay = image.copy()
     polygons = result.get("result_data", [])
@@ -444,6 +447,7 @@ def _render_debug(
                 depth_image,
                 intrinsic,
                 color,
+                suction_pipeline,
             )
             _draw_grasp_target_label(overlay, points, prediction, color)
         else:
@@ -487,9 +491,10 @@ def _save_debug_result(
     extrinsic: np.ndarray | None,
     result: dict[str, Any],
     predictions: list[Any],
+    suction_pipeline: Any | None,
 ) -> None:
     relative_name = "_".join(sample_dir.parts[-2:]) if len(sample_dir.parts) >= 2 else sample_dir.name
-    overlay, summaries = _render_debug(image, depth_image, intrinsic, extrinsic, result, predictions)
+    overlay, summaries = _render_debug(image, depth_image, intrinsic, extrinsic, result, predictions, suction_pipeline)
 
     output_root.mkdir(parents=True, exist_ok=True)
     image_path = output_root / f"{relative_name}_debug.png"
@@ -556,7 +561,17 @@ def run_debug(args: argparse.Namespace) -> None:
         run_elapsed = time.perf_counter() - run_start
 
         save_start = time.perf_counter()
-        _save_debug_result(sample_dir, Path(args.output), image, depth, model.c_matrix, model.extrinsic, result, predictions)
+        _save_debug_result(
+            sample_dir,
+            Path(args.output),
+            image,
+            depth,
+            model.c_matrix,
+            model.extrinsic,
+            result,
+            predictions,
+            model.suction_pipeline,
+        )
         save_elapsed = time.perf_counter() - save_start
         total_elapsed = time.perf_counter() - sample_start
 

@@ -22,51 +22,39 @@ from src.utils.suction_evaluation import (
     suction_area_coverage,
 )
 from src.utils.suction_footprint import (
-    DEFAULT_CUP_CENTER_SPACING_MM,
-    DEFAULT_CUP_DIAMETER_MM,
-    DEFAULT_MIN_CUP_INSIDE_RATIO,
     SuctionFootprint,
     compute_dual_cup_footprint,
     compute_projected_dual_cup_footprint,
     dual_cup_capsule_mask,
     principal_axis_2d,
 )
+from src.utils.suction_config import SuctionConfig
 
 
 class SuctionPipeline:
-    def __init__(
-        self,
-        depth_window: int = 5,
-        normal_window: int = 5,
-        cup_diameter_mm: float = DEFAULT_CUP_DIAMETER_MM,
-        cup_center_spacing_mm: float = DEFAULT_CUP_CENTER_SPACING_MM,
-        min_cup_inside_ratio: float = DEFAULT_MIN_CUP_INSIDE_RATIO,
-        candidate_count: int = 12,
-        candidate_min_distance_px: float = 20.0,
-        pca_offset_px: float = 25.0,
-        normal_surface_enabled: bool = True,
-        normal_seed_window: int = 11,
-        surface_angle_threshold_deg: float = 20.0,
-        min_surface_region_area_ratio: float = 0.15,
-        min_surface_region_area_px: int = 0,
-        min_suction_area_object_coverage: float = 0.90,
-        min_suction_area_surface_coverage: float = 0.85,
-    ) -> None:
-        self.depth_window = depth_window
-        self.normal_window = normal_window
-        self.cup_diameter_mm = float(cup_diameter_mm)
-        self.cup_center_spacing_mm = float(cup_center_spacing_mm)
-        self.min_cup_inside_ratio = float(min_cup_inside_ratio)
-        self.candidate_count = int(candidate_count)
-        self.candidate_min_distance_px = float(candidate_min_distance_px)
-        self.pca_offset_px = float(pca_offset_px)
-        self.normal_surface_enabled = bool(normal_surface_enabled)
-        self.normal_seed_window = int(normal_seed_window)
-        self.surface_angle_threshold_deg = float(surface_angle_threshold_deg)
-        self.min_surface_region_area_ratio = float(min_surface_region_area_ratio)
-        self.min_surface_region_area_px = int(min_surface_region_area_px)
-        self.min_suction_area_object_coverage = float(min_suction_area_object_coverage)
-        self.min_suction_area_surface_coverage = float(min_suction_area_surface_coverage)
+    def __init__(self, config: SuctionConfig) -> None:
+        self.config = config
+        self.depth_window = int(config.depth_window)
+        self.normal_window = int(config.normal_window)
+        self.cup_diameter_mm = float(config.cup_diameter_mm)
+        self.cup_center_spacing_mm = float(config.cup_center_spacing_mm)
+        self.min_cup_inside_ratio = float(config.min_cup_inside_ratio)
+        self.candidate_count = int(config.candidate_count)
+        self.candidate_min_distance_px = float(config.candidate_min_distance_px)
+        self.pca_offset_px = float(config.pca_offset_px)
+        self.candidate_min_offset_px = float(config.candidate_min_offset_px)
+        self.candidate_clearance_offset_ratio = float(config.candidate_clearance_offset_ratio)
+        self.normal_surface_enabled = bool(config.normal_surface_enabled)
+        self.normal_seed_window = int(config.normal_seed_window)
+        self.surface_angle_threshold_deg = float(config.surface_angle_threshold_deg)
+        self.min_surface_region_area_ratio = float(config.min_surface_region_area_ratio)
+        self.min_surface_region_area_px = int(config.min_surface_region_area_px)
+        self.min_suction_area_object_coverage = float(config.min_suction_area_object_coverage)
+        self.min_suction_area_surface_coverage = float(config.min_suction_area_surface_coverage)
+        self.axis_min_area_px = int(config.axis_min_area_px)
+        self.axis_min_rect_ratio = float(config.axis_min_rect_ratio)
+        self.axis_min_pca_ratio = float(config.axis_min_pca_ratio)
+        self.axis_reference_step_px = float(config.axis_reference_step_px)
 
     def compute(
         self,
@@ -351,24 +339,27 @@ class SuctionPipeline:
         surface_debug["footprint_projection"] = "fronto_parallel_fallback"
         return footprint, None
 
-    @staticmethod
-    def _surface_axis_or_fallback(mask: np.ndarray, surface: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+    def _surface_axis_or_fallback(self, mask: np.ndarray, surface: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
         rect_axis, rect_ratio, rect_area = SuctionPipeline._min_area_rect_axis(surface)
-        if rect_axis is not None and rect_area >= 20 and rect_ratio >= 1.2:
+        if rect_axis is not None and rect_area >= self.axis_min_area_px and rect_ratio >= self.axis_min_rect_ratio:
             return rect_axis, {
                 "footprint_axis_source": "normal_surface_min_area_rect",
                 "footprint_axis_xy": [float(rect_axis[0]), float(rect_axis[1])],
                 "footprint_axis_rect_ratio": float(rect_ratio),
                 "footprint_axis_area": int(rect_area),
+                "footprint_axis_min_area_px": int(self.axis_min_area_px),
+                "footprint_axis_min_rect_ratio": float(self.axis_min_rect_ratio),
             }
 
         axis, ratio, area = SuctionPipeline._principal_axis_with_ratio(surface)
-        if area >= 20 and ratio >= 2.5:
+        if area >= self.axis_min_area_px and ratio >= self.axis_min_pca_ratio:
             return axis, {
                 "footprint_axis_source": "normal_surface_pca_fallback",
                 "footprint_axis_xy": [float(axis[0]), float(axis[1])],
                 "footprint_axis_eigen_ratio": float(ratio),
                 "footprint_axis_area": int(area),
+                "footprint_axis_min_area_px": int(self.axis_min_area_px),
+                "footprint_axis_min_pca_ratio": float(self.axis_min_pca_ratio),
             }
 
         fallback = principal_axis_2d(mask)
@@ -378,6 +369,9 @@ class SuctionPipeline:
             "footprint_axis_eigen_ratio": float(ratio),
             "footprint_axis_rect_ratio": float(rect_ratio),
             "footprint_axis_area": int(area),
+            "footprint_axis_min_area_px": int(self.axis_min_area_px),
+            "footprint_axis_min_rect_ratio": float(self.axis_min_rect_ratio),
+            "footprint_axis_min_pca_ratio": float(self.axis_min_pca_ratio),
         }
 
     @staticmethod
@@ -499,7 +493,7 @@ class SuctionPipeline:
         center_clearance = float(distance[center_v, center_u]) if distance.size else 0.0
         offset = self.pca_offset_px
         if center_clearance > 0.0:
-            offset = min(offset, max(5.0, center_clearance * 0.8))
+            offset = min(offset, max(self.candidate_min_offset_px, center_clearance * self.candidate_clearance_offset_ratio))
         if offset <= 0.0:
             return
 
@@ -539,7 +533,7 @@ class SuctionPipeline:
         center_camera: np.ndarray,
     ) -> np.ndarray:
         principal = principal_axis_2d(mask)
-        step = max(5.0, float(self.normal_window))
+        step = max(1.0, self.axis_reference_step_px)
         u_ref = int(round(u + principal[0] * step))
         v_ref = int(round(v + principal[1] * step))
         u_ref = int(np.clip(u_ref, 0, mask.shape[1] - 1))
@@ -618,7 +612,7 @@ class SuctionPipeline:
         if norm < 1e-9:
             return None
         axis = axis / norm
-        step = max(5.0, float(self.normal_window))
+        step = max(1.0, self.axis_reference_step_px)
         u_ref = int(round(float(u) + axis[0] * step))
         v_ref = int(round(float(v) + axis[1] * step))
         reference_camera = pixel_to_camera(u_ref, v_ref, depth_mm, intrinsic) - center_camera
