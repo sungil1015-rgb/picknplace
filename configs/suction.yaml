@@ -14,4 +14,16 @@ suction:
   cup_center_spacing_mm: 35.0
 
   # 각 cup footprint 원 내부 픽셀 중 mask 안에 들어와야 하는 최소 비율.
-  min_cup_inside_ratio: 0.95
+  min_cup_inside_ratio: 0.60
+
+  # mask center normal과 같은 면 connected component를 찾고, 그 면 중심으로 suction point를 이동한다.
+  normal_surface_enabled: true
+  normal_seed_window: 11
+  surface_angle_threshold_deg: 30.0
+  min_surface_region_area_ratio: 0.03
+  min_surface_region_area_px: 200
+
+  # 선택된 면 중심에서 dual-cup + 중간 capsule suction area가 object/normal surface 안에 들어오는 최소 비율.
+  # 실패하면 다음 suction candidate seed의 normal surface를 다시 평가한다.
+  min_suction_area_object_coverage: 0.81
+  min_suction_area_surface_coverage: 0.65

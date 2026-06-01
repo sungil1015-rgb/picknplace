@@ -105,6 +105,85 @@ def compute_dual_cup_footprint(
     )
 
 
+def compute_projected_dual_cup_footprint(
+    mask: np.ndarray,
+    center_xy: tuple[int, int] | np.ndarray,
+    depth_mm: float,
+    intrinsic: np.ndarray,
+    normal_camera: np.ndarray,
+    cup_diameter_mm: float = DEFAULT_CUP_DIAMETER_MM,
+    cup_center_spacing_mm: float = DEFAULT_CUP_CENTER_SPACING_MM,
+    min_cup_inside_ratio: float = DEFAULT_MIN_CUP_INSIDE_RATIO,
+    axis_xy: np.ndarray | None = None,
+) -> tuple[SuctionFootprint | None, np.ndarray | None]:
+    footprint = compute_dual_cup_footprint(
+        mask,
+        center_xy,
+        depth_mm,
+        intrinsic,
+        cup_diameter_mm=cup_diameter_mm,
+        cup_center_spacing_mm=cup_center_spacing_mm,
+        min_cup_inside_ratio=min_cup_inside_ratio,
+        axis_xy=axis_xy,
+    )
+    if footprint is None:
+        return None, None
+
+    suction_area, cup_masks = dual_cup_normal_projected_capsule_mask(mask.shape, footprint, normal_camera)
+    inside_ratios = [_mask_inside_ratio(mask, cup_mask) for cup_mask in cup_masks]
+    min_ratio = min(inside_ratios, default=0.0)
+    feasible = min_ratio >= float(min_cup_inside_ratio)
+
+    return (
+        SuctionFootprint(
+            feasible=bool(feasible),
+            reason=None if feasible else "cup_outside_mask",
+            depth_mm=footprint.depth_mm,
+            cup_diameter_mm=footprint.cup_diameter_mm,
+            cup_center_spacing_mm=footprint.cup_center_spacing_mm,
+            cup_radius_px=footprint.cup_radius_px,
+            cup_center_spacing_px=footprint.cup_center_spacing_px,
+            axis_xy=footprint.axis_xy,
+            cup_centers_xy=footprint.cup_centers_xy,
+            cup_inside_ratios=[float(value) for value in inside_ratios],
+            min_cup_inside_ratio=float(min_ratio),
+            required_min_cup_inside_ratio=float(min_cup_inside_ratio),
+        ),
+        suction_area,
+    )
+
+
+def dual_cup_normal_projected_capsule_mask(
+    image_shape: tuple[int, int],
+    footprint: SuctionFootprint,
+    normal_camera: np.ndarray,
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    centers = np.asarray(footprint.cup_centers_xy, dtype=np.float64)
+    if centers.shape != (2, 2):
+        empty = np.zeros(image_shape[:2], dtype=bool)
+        return empty, [empty.copy(), empty.copy()]
+
+    radius = float(footprint.cup_radius_px)
+    normal = np.asarray(normal_camera, dtype=np.float64).reshape(3)
+    norm = np.linalg.norm(normal)
+    normal_z = abs(float(normal[2] / norm)) if norm >= 1e-9 else 1.0
+    minor_scale = float(np.clip(normal_z, 0.25, 1.0))
+
+    tilt_axis = np.asarray([normal[0], normal[1]], dtype=np.float64)
+    if np.linalg.norm(tilt_axis) < 1e-9:
+        minor_axis = np.array([-footprint.axis_xy[1], footprint.axis_xy[0]], dtype=np.float64)
+    else:
+        minor_axis = tilt_axis / np.linalg.norm(tilt_axis)
+    major_axis = np.array([-minor_axis[1], minor_axis[0]], dtype=np.float64)
+
+    suction_area = _ellipse_capsule_mask(image_shape, centers, radius, radius * minor_scale, major_axis, minor_axis)
+    cup_masks = [
+        _ellipse_mask(image_shape, center, radius, radius * minor_scale, major_axis, minor_axis)
+        for center in centers
+    ]
+    return suction_area, cup_masks
+
+
 def cup_inside_ratio(mask: np.ndarray, center_xy: np.ndarray, radius_px: float) -> float:
     radius = float(radius_px)
     x_min = int(np.floor(float(center_xy[0]) - radius))
@@ -126,3 +205,95 @@ def cup_inside_ratio(mask: np.ndarray, center_xy: np.ndarray, radius_px: float) 
     valid_x = xx[in_bounds].astype(np.int64)
     inside[in_bounds] = mask[valid_y, valid_x] > 0
     return float((cup_pixels & inside).sum() / total)
+
+
+def dual_cup_capsule_mask(image_shape: tuple[int, int], footprint: SuctionFootprint) -> np.ndarray:
+    centers = np.asarray(footprint.cup_centers_xy, dtype=np.float64)
+    if centers.shape != (2, 2):
+        return np.zeros(image_shape[:2], dtype=bool)
+    radius = float(footprint.cup_radius_px)
+    height, width = image_shape[:2]
+
+    x_min = max(0, int(np.floor(float(centers[:, 0].min()) - radius)))
+    x_max = min(width - 1, int(np.ceil(float(centers[:, 0].max()) + radius)))
+    y_min = max(0, int(np.floor(float(centers[:, 1].min()) - radius)))
+    y_max = min(height - 1, int(np.ceil(float(centers[:, 1].max()) + radius)))
+    region = np.zeros((height, width), dtype=bool)
+    if x_max < x_min or y_max < y_min:
+        return region
+
+    yy, xx = np.mgrid[y_min : y_max + 1, x_min : x_max + 1]
+    points = np.stack((xx.astype(np.float64), yy.astype(np.float64)), axis=-1)
+    start = centers[0]
+    end = centers[1]
+    segment = end - start
+    segment_len_sq = float(np.dot(segment, segment))
+    if segment_len_sq < 1e-9:
+        capsule = ((points[..., 0] - start[0]) ** 2 + (points[..., 1] - start[1]) ** 2) <= radius * radius
+    else:
+        t = ((points - start) @ segment) / segment_len_sq
+        t = np.clip(t, 0.0, 1.0)
+        closest = start + t[..., np.newaxis] * segment
+        dist_sq = np.sum((points - closest) ** 2, axis=-1)
+        capsule = dist_sq <= radius * radius
+    region[y_min : y_max + 1, x_min : x_max + 1] = capsule
+    return region
+
+
+def _ellipse_capsule_mask(
+    image_shape: tuple[int, int],
+    centers: np.ndarray,
+    major_radius: float,
+    minor_radius: float,
+    major_axis: np.ndarray,
+    minor_axis: np.ndarray,
+) -> np.ndarray:
+    region = np.zeros(image_shape[:2], dtype=bool)
+    if centers.shape != (2, 2):
+        return region
+
+    pad = float(max(major_radius, minor_radius))
+    height, width = image_shape[:2]
+    x_min = max(0, int(np.floor(float(centers[:, 0].min()) - pad)))
+    x_max = min(width - 1, int(np.ceil(float(centers[:, 0].max()) + pad)))
+    y_min = max(0, int(np.floor(float(centers[:, 1].min()) - pad)))
+    y_max = min(height - 1, int(np.ceil(float(centers[:, 1].max()) + pad)))
+    if x_max < x_min or y_max < y_min:
+        return region
+
+    yy, xx = np.mgrid[y_min : y_max + 1, x_min : x_max + 1]
+    points = np.stack((xx.astype(np.float64), yy.astype(np.float64)), axis=-1)
+    start, end = centers
+    segment = end - start
+    segment_len_sq = float(np.dot(segment, segment))
+    if segment_len_sq < 1e-9:
+        local = points - start
+    else:
+        t = ((points - start) @ segment) / segment_len_sq
+        t = np.clip(t, 0.0, 1.0)
+        closest = start + t[..., np.newaxis] * segment
+        local = points - closest
+
+    major = np.sum(local * major_axis.reshape(1, 1, 2), axis=2) / max(float(major_radius), 1e-6)
+    minor = np.sum(local * minor_axis.reshape(1, 1, 2), axis=2) / max(float(minor_radius), 1e-6)
+    region[y_min : y_max + 1, x_min : x_max + 1] = (major * major + minor * minor) <= 1.0
+    return region
+
+
+def _ellipse_mask(
+    image_shape: tuple[int, int],
+    center: np.ndarray,
+    major_radius: float,
+    minor_radius: float,
+    major_axis: np.ndarray,
+    minor_axis: np.ndarray,
+) -> np.ndarray:
+    centers = np.asarray([center, center], dtype=np.float64)
+    return _ellipse_capsule_mask(image_shape, centers, major_radius, minor_radius, major_axis, minor_axis)
+
+
+def _mask_inside_ratio(mask: np.ndarray, region: np.ndarray) -> float:
+    total = int(np.count_nonzero(region))
+    if total <= 0:
+        return 0.0
+    return float(np.count_nonzero(region & (mask > 0)) / total)

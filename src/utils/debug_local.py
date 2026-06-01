@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import resource
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,29 @@ def _build_logger() -> logging.Logger:
         logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     return logger
+
+
+def _rss_mb() -> float | None:
+    status_path = Path("/proc/self/status")
+    if not status_path.is_file():
+        return None
+    for line in status_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if line.startswith("VmRSS:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                return float(parts[1]) / 1024.0
+    return None
+
+
+def _peak_rss_mb() -> float:
+    value = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    return value / 1024.0
+
+
+def _memory_text() -> str:
+    rss = _rss_mb()
+    rss_text = f"{rss:.1f} MB" if rss is not None else "n/a"
+    return f"rss={rss_text}, peak={_peak_rss_mb():.1f} MB"
 
 
 def _selected_model(option_file: str) -> tuple[dict[str, Any], str]:
@@ -85,6 +110,12 @@ def _sample_dirs(input_dir: Path) -> list[Path]:
 
 
 def _grasp_pixel(prediction: Any, polygon: list[list[int]]) -> tuple[int, int]:
+    surface_debug = getattr(prediction, "suction_surface", None)
+    if isinstance(surface_debug, dict):
+        center_xy = surface_debug.get("surface_center_xy")
+        if isinstance(center_xy, list) and len(center_xy) == 2:
+            return int(center_xy[0]), int(center_xy[1])
+
     mask = getattr(prediction, "mask", None)
     if mask is not None and np.any(mask):
         binary = largest_component_mask((mask > 0).astype(np.uint8))
@@ -202,8 +233,10 @@ def _priority_debug(prediction: Any) -> dict[str, Any]:
         "center_distance": _finite_float(getattr(prediction, "grasp_center_distance", None)),
         "depth_candidate": bool(getattr(prediction, "grasp_depth_candidate", False)),
         "valid_depth": bool(getattr(prediction, "grasp_valid_depth", False)),
+        "suction_normal_z_score": _finite_float(getattr(prediction, "suction_normal_z_score", None)),
         "suction_footprint": footprint if isinstance(footprint, dict) else None,
         "suction_candidates": list(getattr(prediction, "suction_candidates", []) or []),
+        "suction_surface": getattr(prediction, "suction_surface", None),
     }
 
 
@@ -245,6 +278,32 @@ def _draw_dual_cup_footprint(
     intrinsic: np.ndarray | None,
     color: tuple[int, int, int],
 ) -> dict[str, Any]:
+    stored_footprint = getattr(prediction, "suction_footprint", None) if prediction is not None else None
+    if isinstance(stored_footprint, dict):
+        radius_px = _finite_float(stored_footprint.get("cup_radius_px"))
+        cup_centers_xy = stored_footprint.get("cup_centers_xy")
+        if radius_px is not None and isinstance(cup_centers_xy, list) and len(cup_centers_xy) == 2:
+            radius_int = max(1, int(round(radius_px)))
+            center_points = [
+                (int(round(float(point[0]))), int(round(float(point[1]))))
+                for point in cup_centers_xy
+                if isinstance(point, list) and len(point) == 2
+            ]
+            if len(center_points) == 2:
+                cv2.line(image, center_points[0], center_points[1], color, 2, cv2.LINE_AA)
+                for point in center_points:
+                    cv2.circle(image, point, radius_int, (255, 255, 255), 4, cv2.LINE_AA)
+                    cv2.circle(image, point, radius_int, color, 2, cv2.LINE_AA)
+                    cv2.circle(image, point, 3, color, -1, cv2.LINE_AA)
+
+                data = dict(stored_footprint)
+                data.update({
+                    "drawn": True,
+                    "source": "pipeline_suction_footprint",
+                    "cup_centers_xy": [[int(x), int(y)] for x, y in center_points],
+                })
+                return data
+
     mask = getattr(prediction, "mask", None) if prediction is not None else None
     depth_mm = _local_depth_mm(depth_image, grasp_xy, mask)
     if depth_mm is None or depth_mm <= 0 or intrinsic is None:
@@ -413,16 +472,20 @@ def run_debug(args: argparse.Namespace) -> None:
 
     logger.info(f"debug samples: {len(sample_dirs)}")
     for sample_dir in sample_dirs:
+        sample_start = time.perf_counter()
         rgb_path = sample_dir / "rgb.png"
         depth_path = sample_dir / "depth.png"
         normal_path = sample_dir / "normal.bin"
 
+        load_start = time.perf_counter()
         image = cv2.imread(str(rgb_path), cv2.IMREAD_COLOR)
         if image is None:
             raise FileNotFoundError(f"Failed to read image: {rgb_path}")
         depth = cv2.imread(str(depth_path), cv2.IMREAD_UNCHANGED) if depth_path.is_file() else None
         normal = _load_normal(normal_path, image.shape[:2])
+        load_elapsed = time.perf_counter() - load_start
 
+        run_start = time.perf_counter()
         result, predictions = model.run(
             image,
             depth_image=depth,
@@ -430,8 +493,22 @@ def run_debug(args: argparse.Namespace) -> None:
             compute_suction_pts=True,
             roi_2d=DEBUG_ROI_2013,
         )
+        run_elapsed = time.perf_counter() - run_start
+
+        save_start = time.perf_counter()
         _save_debug_result(sample_dir, Path(args.output), image, depth, model.c_matrix, result, predictions)
-        logger.info(f"saved: {sample_dir}")
+        save_elapsed = time.perf_counter() - save_start
+        total_elapsed = time.perf_counter() - sample_start
+
+        logger.info(
+            "saved: %s | time load=%.3fs run=%.3fs save=%.3fs total=%.3fs | %s",
+            sample_dir,
+            load_elapsed,
+            run_elapsed,
+            save_elapsed,
+            total_elapsed,
+            _memory_text(),
+        )
 
 
 def parse_args() -> argparse.Namespace:

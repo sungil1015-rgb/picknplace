@@ -27,6 +27,7 @@ from src.pipeline.grasp_priority import GraspPriorityScorer
 from src.pipeline.suction_pipeline import SuctionPipeline
 from src.utils.geometry import extrinsic_from_translation_and_euler, make_intrinsic, quaternion_to_rotation_matrix
 from src.utils.mask import largest_component_mask, mask_to_polygon
+from src.utils.suction_evaluation import normal_z_score
 
 
 def _load_yaml(path: str | Path) -> dict[str, Any]:
@@ -187,6 +188,13 @@ class PickNPlace:
             candidate_count=int(_required(suction_cfg, "candidate_count", "suction")),
             candidate_min_distance_px=float(_required(suction_cfg, "candidate_min_distance_px", "suction")),
             pca_offset_px=float(_required(suction_cfg, "pca_offset_px", "suction")),
+            normal_surface_enabled=bool(_required(suction_cfg, "normal_surface_enabled", "suction")),
+            normal_seed_window=int(_required(suction_cfg, "normal_seed_window", "suction")),
+            surface_angle_threshold_deg=float(_required(suction_cfg, "surface_angle_threshold_deg", "suction")),
+            min_surface_region_area_ratio=float(_required(suction_cfg, "min_surface_region_area_ratio", "suction")),
+            min_surface_region_area_px=int(_required(suction_cfg, "min_surface_region_area_px", "suction")),
+            min_suction_area_object_coverage=float(_required(suction_cfg, "min_suction_area_object_coverage", "suction")),
+            min_suction_area_surface_coverage=float(_required(suction_cfg, "min_suction_area_surface_coverage", "suction")),
         )
 
     def _load_extrinsic(self) -> np.ndarray:
@@ -349,15 +357,6 @@ class PickNPlace:
         else:
             class_ids = [int(prediction.label) if prediction.label is not None else 0 for prediction in kept_predictions]
 
-        if compute_suction_pts:
-            suction_points = self.suction_pipeline.compute(
-                kept_predictions,
-                depth_image,
-                normal_image,
-                self.c_matrix,
-                self.extrinsic,
-            )
-
         priority_scores = self.priority_scorer.score_instances(
             kept_predictions,
             depth_image,
@@ -377,6 +376,25 @@ class PickNPlace:
             instance.grasp_center_distance = priority_score.center_distance
             instance.grasp_depth_candidate = priority_score.depth_candidate
             instance.grasp_valid_depth = priority_score.valid_depth
+
+        if compute_suction_pts:
+            for instance in kept_predictions:
+                instance.suction_footprint = None
+                instance.suction_candidates = []
+                instance.suction_surface = None
+                instance.suction_normal_z_score = None
+
+            target_index = self._select_priority_target_index(kept_predictions, priority_scores)
+            if target_index is not None:
+                target_suction_points = self.suction_pipeline.compute(
+                    [kept_predictions[target_index]],
+                    depth_image,
+                    normal_image,
+                    self.c_matrix,
+                    self.extrinsic,
+                )
+                kept_predictions[target_index].suction_normal_z_score = self._suction_normal_z_score(kept_predictions[target_index])
+                suction_points[target_index] = target_suction_points[0] if target_suction_points else []
 
         items = list(zip(polygons, class_ids, suction_points, kept_predictions, priority_scores))
         items.sort(
@@ -402,6 +420,32 @@ class PickNPlace:
             "2d_roi": resolved_roi_2d,
         }
         return result, kept_predictions
+
+    @staticmethod
+    def _select_priority_target_index(
+            predictions: List[Any],
+            priority_scores: List[Any],
+    ) -> Optional[int]:
+        if not predictions or not priority_scores:
+            return None
+        count = min(len(predictions), len(priority_scores))
+        if count <= 0:
+            return None
+        return max(
+            range(count),
+            key=lambda index: (
+                float(priority_scores[index].total),
+                float(getattr(predictions[index], "class_similarity", 0.0)),
+                float(getattr(predictions[index], "score", 0.0) or 0.0),
+            ),
+        )
+
+    @staticmethod
+    def _suction_normal_z_score(prediction: Any) -> float:
+        surface_debug = getattr(prediction, "suction_surface", None)
+        if not isinstance(surface_debug, dict) or not surface_debug.get("passed", False):
+            return 0.0
+        return normal_z_score(surface_debug)
 
     # ─── 결과 시각화 저장 ───────────────────────────────────────────────
 
