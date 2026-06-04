@@ -55,11 +55,25 @@ class SuctionConfig:
     surface_angle_threshold_deg: float
     surface_open_kernel_px: int
     surface_close_kernel_px: int
+    surface_fill_holes_max_area_px: int
+    surface_fill_holes_max_aspect_ratio: float
     surface_center_method: str
     surface_rect_max_area_ratio: float
     min_surface_region_area_ratio: float
     min_surface_region_area_px: int
     normal_cluster_max_count: int
+    class3_depth_split_enabled: bool
+    class3_depth_split_min_gap_mm: float
+    class3_depth_split_trim_low_percentile: float
+    class3_depth_split_trim_high_percentile: float
+    class3_depth_split_cut_band_mm: float
+    class3_depth_split_bridge_open_kernel_px: int
+    class3_depth_split_line_cut_enabled: bool
+    class3_depth_split_line_cut_thickness_px: int
+    class3_depth_split_line_cut_min_aspect_ratio: float
+    class3_depth_split_min_layer_area_px: int
+    class3_depth_split_min_layer_area_ratio: float
+    class3_depth_split_min_component_area_px: int
     min_suction_area_object_coverage: float
     min_suction_area_surface_coverage: float
     axis_min_area_px: int
@@ -77,6 +91,7 @@ class SuctionConfig:
         morphology_cfg = _section(normal_cfg, "morphology")
         center_cfg = _section(normal_cfg, "center")
         region_cfg = _section(normal_cfg, "min_region")
+        class3_depth_cfg = _section(normal_cfg, "class3_depth_split")
         advanced_cfg = _section(mapping, "advanced")
         footprint_cfg = _section(advanced_cfg, "footprint")
         axis_cfg = _section(advanced_cfg, "axis")
@@ -97,11 +112,25 @@ class SuctionConfig:
             surface_angle_threshold_deg=float(_get(mapping, normal_cfg, "angle_threshold_deg", "surface_angle_threshold_deg")),
             surface_open_kernel_px=int(_get(mapping, morphology_cfg, "open_kernel_px", "surface_open_kernel_px")),
             surface_close_kernel_px=int(_get(mapping, morphology_cfg, "close_kernel_px", "surface_close_kernel_px")),
+            surface_fill_holes_max_area_px=int(_get(mapping, morphology_cfg, "fill_holes_max_area_px", "surface_fill_holes_max_area_px", 0)),
+            surface_fill_holes_max_aspect_ratio=float(_get(mapping, morphology_cfg, "fill_holes_max_aspect_ratio", "surface_fill_holes_max_aspect_ratio", 4.0)),
             surface_center_method=str(_get(mapping, center_cfg, "method", "surface_center_method")),
             surface_rect_max_area_ratio=float(_get(mapping, center_cfg, "rect_max_area_ratio", "surface_rect_max_area_ratio")),
             min_surface_region_area_ratio=float(_get(mapping, region_cfg, "area_ratio", "min_surface_region_area_ratio")),
             min_surface_region_area_px=int(_get(mapping, region_cfg, "area_px", "min_surface_region_area_px")),
             normal_cluster_max_count=int(_get(mapping, cluster_cfg, "max_count", "normal_cluster_max_count", 5)),
+            class3_depth_split_enabled=as_bool(class3_depth_cfg.get("enabled", False)),
+            class3_depth_split_min_gap_mm=float(class3_depth_cfg.get("min_gap_mm", 1.0)),
+            class3_depth_split_trim_low_percentile=float(class3_depth_cfg.get("trim_low_percentile", 1.0)),
+            class3_depth_split_trim_high_percentile=float(class3_depth_cfg.get("trim_high_percentile", 99.0)),
+            class3_depth_split_cut_band_mm=float(class3_depth_cfg.get("cut_band_mm", 0.0)),
+            class3_depth_split_bridge_open_kernel_px=int(class3_depth_cfg.get("bridge_open_kernel_px", 1)),
+            class3_depth_split_line_cut_enabled=as_bool(class3_depth_cfg.get("line_cut_enabled", False)),
+            class3_depth_split_line_cut_thickness_px=int(class3_depth_cfg.get("line_cut_thickness_px", 5)),
+            class3_depth_split_line_cut_min_aspect_ratio=float(class3_depth_cfg.get("line_cut_min_aspect_ratio", 3.0)),
+            class3_depth_split_min_layer_area_px=int(class3_depth_cfg.get("min_layer_area_px", 300)),
+            class3_depth_split_min_layer_area_ratio=float(class3_depth_cfg.get("min_layer_area_ratio", 0.08)),
+            class3_depth_split_min_component_area_px=int(class3_depth_cfg.get("min_component_area_px", 300)),
             min_suction_area_object_coverage=float(_get(mapping, footprint_cfg, "min_object_coverage", "min_suction_area_object_coverage")),
             min_suction_area_surface_coverage=float(_get(mapping, footprint_cfg, "min_surface_coverage", "min_suction_area_surface_coverage")),
             axis_min_area_px=int(_get(mapping, axis_cfg, "min_area_px", "axis_min_area_px")),

@@ -18,6 +18,8 @@ def clustered_normal_surface_candidates(
     max_clusters: int,
     open_kernel_px: int,
     close_kernel_px: int,
+    fill_holes_max_area_px: int,
+    fill_holes_max_aspect_ratio: float,
     center_method: str,
     rect_max_area_ratio: float,
 ) -> list[tuple[np.ndarray | None, dict[str, Any]]]:
@@ -61,7 +63,13 @@ def clustered_normal_surface_candidates(
             remaining[ys, xs] = False
             continue
 
-        cleaned = _cleanup(cluster, open_kernel_px, close_kernel_px)
+        cleaned, cleanup_debug = _cleanup(
+            cluster,
+            open_kernel_px,
+            close_kernel_px,
+            fill_holes_max_area_px,
+            fill_holes_max_aspect_ratio,
+        )
         remaining[cluster] = False
         if not np.any(cleaned):
             attempts.append(
@@ -132,6 +140,7 @@ def clustered_normal_surface_candidates(
                         "surface_raw_pixels": raw_pixels,
                         "surface_open_kernel_px": int(open_kernel_px),
                         "surface_close_kernel_px": int(close_kernel_px),
+                        **cleanup_debug,
                         "surface_center_method": str(center_method),
                         "surface_center_used_method": center_debug["used_method"],
                         "surface_center_fallback_reason": center_debug.get("fallback_reason"),
@@ -186,11 +195,25 @@ def _mean_normal(values: np.ndarray) -> np.ndarray | None:
     return normal / norm
 
 
-def _cleanup(surface: np.ndarray, open_kernel_px: int, close_kernel_px: int) -> np.ndarray:
+def _cleanup(
+    surface: np.ndarray,
+    open_kernel_px: int,
+    close_kernel_px: int,
+    fill_holes_max_area_px: int,
+    fill_holes_max_aspect_ratio: float,
+) -> tuple[np.ndarray, dict[str, Any]]:
     cleaned = surface.astype(np.uint8)
     cleaned = _morph(cleaned, cv2.MORPH_OPEN, open_kernel_px)
-    cleaned = _morph(cleaned, cv2.MORPH_CLOSE, close_kernel_px)
-    return cleaned > 0
+    filled, fill_debug = _fill_small_enclosed_holes(
+        cleaned > 0,
+        fill_holes_max_area_px,
+        fill_holes_max_aspect_ratio,
+    )
+    return filled, {
+        "surface_close_kernel_used": False,
+        "surface_hole_fill_enabled": int(fill_holes_max_area_px) > 0,
+        **fill_debug,
+    }
 
 
 def _morph(mask: np.ndarray, operation: int, kernel_px: int) -> np.ndarray:
@@ -201,6 +224,48 @@ def _morph(mask: np.ndarray, operation: int, kernel_px: int) -> np.ndarray:
         kernel_size += 1
     kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
     return cv2.morphologyEx(mask.astype(np.uint8), operation, kernel)
+
+
+def _fill_small_enclosed_holes(
+    surface: np.ndarray,
+    max_area_px: int,
+    max_aspect_ratio: float,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    max_area = int(max_area_px)
+    if max_area <= 0:
+        return surface > 0, {"surface_holes_filled": 0, "surface_holes_filled_area": 0}
+
+    max_aspect = max(float(max_aspect_ratio), 1.0)
+    background = ~(surface > 0)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(background.astype(np.uint8), connectivity=8)
+    filled = surface.copy() > 0
+    filled_count = 0
+    filled_area = 0
+    height, width = surface.shape[:2]
+
+    for label in range(1, count):
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        w = int(stats[label, cv2.CC_STAT_WIDTH])
+        h = int(stats[label, cv2.CC_STAT_HEIGHT])
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area <= 0 or area > max_area:
+            continue
+        if x <= 0 or y <= 0 or x + w >= width or y + h >= height:
+            continue
+        aspect = float(max(w, h) / max(min(w, h), 1))
+        if aspect >= max_aspect:
+            continue
+        filled[labels == label] = True
+        filled_count += 1
+        filled_area += area
+
+    return filled, {
+        "surface_holes_filled": int(filled_count),
+        "surface_holes_filled_area": int(filled_area),
+        "surface_fill_holes_max_area_px": int(max_area),
+        "surface_fill_holes_max_aspect_ratio": float(max_aspect),
+    }
 
 
 def _surface_center(

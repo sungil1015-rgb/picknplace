@@ -15,7 +15,7 @@ from src.utils.geometry import (
     transform_point,
 )
 from src.utils.class4_bottle import estimate_class4_bottle_surface
-from src.utils.depth import median_valid_depth_at_point
+from src.utils.depth import median_valid_depth_at_point, split_surface_by_depth_gap
 from src.utils.mask import largest_component_mask, mask_center_point
 from src.utils.normal_surface import clustered_normal_surface_candidates
 from src.utils.suction_evaluation import (
@@ -54,11 +54,25 @@ class SuctionPipeline:
         self.surface_angle_threshold_deg = float(config.surface_angle_threshold_deg)
         self.surface_open_kernel_px = int(config.surface_open_kernel_px)
         self.surface_close_kernel_px = int(config.surface_close_kernel_px)
+        self.surface_fill_holes_max_area_px = int(config.surface_fill_holes_max_area_px)
+        self.surface_fill_holes_max_aspect_ratio = float(config.surface_fill_holes_max_aspect_ratio)
         self.surface_center_method = str(config.surface_center_method)
         self.surface_rect_max_area_ratio = float(config.surface_rect_max_area_ratio)
         self.min_surface_region_area_ratio = float(config.min_surface_region_area_ratio)
         self.min_surface_region_area_px = int(config.min_surface_region_area_px)
         self.normal_cluster_max_count = int(config.normal_cluster_max_count)
+        self.class3_depth_split_enabled = bool(config.class3_depth_split_enabled)
+        self.class3_depth_split_min_gap_mm = float(config.class3_depth_split_min_gap_mm)
+        self.class3_depth_split_trim_low_percentile = float(config.class3_depth_split_trim_low_percentile)
+        self.class3_depth_split_trim_high_percentile = float(config.class3_depth_split_trim_high_percentile)
+        self.class3_depth_split_cut_band_mm = float(config.class3_depth_split_cut_band_mm)
+        self.class3_depth_split_bridge_open_kernel_px = int(config.class3_depth_split_bridge_open_kernel_px)
+        self.class3_depth_split_line_cut_enabled = bool(config.class3_depth_split_line_cut_enabled)
+        self.class3_depth_split_line_cut_thickness_px = int(config.class3_depth_split_line_cut_thickness_px)
+        self.class3_depth_split_line_cut_min_aspect_ratio = float(config.class3_depth_split_line_cut_min_aspect_ratio)
+        self.class3_depth_split_min_layer_area_px = int(config.class3_depth_split_min_layer_area_px)
+        self.class3_depth_split_min_layer_area_ratio = float(config.class3_depth_split_min_layer_area_ratio)
+        self.class3_depth_split_min_component_area_px = int(config.class3_depth_split_min_component_area_px)
         self.min_suction_area_object_coverage = float(config.min_suction_area_object_coverage)
         self.min_suction_area_surface_coverage = float(config.min_suction_area_surface_coverage)
         self.axis_min_area_px = int(config.axis_min_area_px)
@@ -141,6 +155,7 @@ class SuctionPipeline:
         if strategy == "normal" or (strategy == "class4_bottle" and selected is None):
             if self.normal_surface_enabled and normal_image is not None:
                 selected, failure_debug = self._select_normal_surface_suction(
+                    instance,
                     binary_mask,
                     depth_image,
                     normal_image,
@@ -339,6 +354,7 @@ class SuctionPipeline:
 
     def _select_normal_surface_suction(
         self,
+        instance: Any,
         mask: np.ndarray,
         depth_image: np.ndarray,
         normal_image: np.ndarray | None,
@@ -354,6 +370,7 @@ class SuctionPipeline:
             normal_image,
             intrinsic,
             extrinsic,
+            instance,
         )
 
     def _select_clustered_normal_surface_suction(
@@ -363,6 +380,7 @@ class SuctionPipeline:
         normal_image: np.ndarray,
         intrinsic: np.ndarray,
         extrinsic: np.ndarray,
+        instance: Any | None = None,
     ) -> tuple[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]] | None, dict[str, Any] | None]:
         attempts: list[dict[str, Any]] = []
         passed_options: list[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]]] = []
@@ -375,6 +393,8 @@ class SuctionPipeline:
             max_clusters=self.normal_cluster_max_count,
             open_kernel_px=self.surface_open_kernel_px,
             close_kernel_px=self.surface_close_kernel_px,
+            fill_holes_max_area_px=self.surface_fill_holes_max_area_px,
+            fill_holes_max_aspect_ratio=self.surface_fill_holes_max_aspect_ratio,
             center_method=self.surface_center_method,
             rect_max_area_ratio=self.surface_rect_max_area_ratio,
         )
@@ -383,6 +403,17 @@ class SuctionPipeline:
             surface_debug["candidate_source"] = "normal_cluster"
             if surface is None or not surface_debug.get("passed"):
                 surface_debug["suction_reject_reason"] = surface_debug.get("reason", "normal_cluster_rejected")
+                attempts.append(surface_debug)
+                continue
+
+            surface, surface_debug = self._refine_class3_surface_by_depth(
+                instance,
+                depth_image,
+                surface,
+                mask,
+                surface_debug,
+            )
+            if surface is None:
                 attempts.append(surface_debug)
                 continue
 
@@ -447,6 +478,68 @@ class SuctionPipeline:
             "normal_surface_mode": "clustered",
             "attempts": attempts,
         }
+
+    def _refine_class3_surface_by_depth(
+        self,
+        instance: Any | None,
+        depth_image: np.ndarray,
+        surface: np.ndarray,
+        object_mask: np.ndarray,
+        surface_debug: dict[str, Any],
+    ) -> tuple[np.ndarray | None, dict[str, Any]]:
+        if not self.class3_depth_split_enabled or self._class_index(instance) != 3:
+            return surface, surface_debug
+
+        split = split_surface_by_depth_gap(
+            depth_image,
+            surface,
+            min_depth_gap_mm=self.class3_depth_split_min_gap_mm,
+            trim_low_percentile=self.class3_depth_split_trim_low_percentile,
+            trim_high_percentile=self.class3_depth_split_trim_high_percentile,
+            cut_band_mm=self.class3_depth_split_cut_band_mm,
+            bridge_open_kernel_px=self.class3_depth_split_bridge_open_kernel_px,
+            line_cut_enabled=self.class3_depth_split_line_cut_enabled,
+            line_cut_thickness_px=self.class3_depth_split_line_cut_thickness_px,
+            line_cut_min_aspect_ratio=self.class3_depth_split_line_cut_min_aspect_ratio,
+            min_layer_area_px=self.class3_depth_split_min_layer_area_px,
+            min_layer_area_ratio=self.class3_depth_split_min_layer_area_ratio,
+            min_component_area_px=self.class3_depth_split_min_component_area_px,
+        )
+        refined_debug = {**surface_debug, "class3_depth_split": split.debug}
+        if split.surface is None:
+            return surface, refined_debug
+
+        refined_surface = split.surface
+        surface_area = int(np.count_nonzero(refined_surface))
+        object_area = max(int(np.count_nonzero(object_mask > 0)), 1)
+        area_ratio = float(surface_area / object_area)
+        center_xy = list(self._depth_refined_surface_center(refined_surface))
+        refined_debug.update(
+            {
+                "surface_area_before_depth_split": int(surface_debug.get("surface_area", 0)),
+                "surface_area_ratio_before_depth_split": surface_debug.get("surface_area_ratio"),
+                "surface_area": surface_area,
+                "surface_area_ratio": area_ratio,
+                "surface_center_xy": center_xy,
+                "component_seed_xy": center_xy,
+                "seed_xy": center_xy,
+            }
+        )
+        if area_ratio < self.min_surface_region_area_ratio or surface_area < self.min_surface_region_area_px:
+            refined_debug["passed"] = False
+            refined_debug["reason"] = "class3_depth_surface_too_small"
+            refined_debug["suction_reject_reason"] = "class3_depth_surface_too_small"
+            return None, refined_debug
+        return refined_surface, refined_debug
+
+    @staticmethod
+    def _depth_refined_surface_center(surface: np.ndarray) -> tuple[int, int]:
+        distance = cv2.distanceTransform((surface > 0).astype(np.uint8), cv2.DIST_L2, 5)
+        if np.any(distance > 0):
+            y, x = np.unravel_index(int(np.argmax(distance)), distance.shape)
+            return int(x), int(y)
+        center = mask_center_point(surface)
+        return int(center[0]), int(center[1])
 
     @staticmethod
     def _robot_z_tilt_deg(surface_debug: dict[str, Any], extrinsic: np.ndarray) -> float:
