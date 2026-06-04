@@ -1,37 +1,63 @@
 suction:
-  # suction point 주변 depth/normal을 계산할 local window 크기(pixel).
-  depth_window: 10
-  normal_window: 20
-
-  # 후보점 생성:
-  # 1) distance transform 최고점, 2) mask center, 3) PCA long/short axis offset, 4) distance transform 상위점.
-  candidate_count: 12
-  candidate_min_distance_px: 20.0
-  pca_offset_px: 25.0
-  candidate_min_offset_px: 5.0
-  candidate_clearance_offset_ratio: 0.8
+  # class별 suction point 선택 방식.
+  # normal: normal surface 기준, mask: 2D mask 후보점 기준, class4_bottle: 투명 물통 예외 로직.
+  strategy:
+    default: normal
+    by_class:
+      # 비닐류는 normal이 불안정하므로 2D mask 후보점을 사용한다.
+      0: mask
+      1: mask
+      4: class4_bottle
 
   # dual suction cup 실제 규격(mm).
-  cup_diameter_mm: 25.0
-  cup_center_spacing_mm: 35.0
+  cup:
+    diameter_mm: 25.0
+    center_spacing_mm: 35.0
 
-  # 각 cup footprint 원 내부 픽셀 중 mask 안에 들어와야 하는 최소 비율.
-  min_cup_inside_ratio: 0.8
+  # 2D mask 기반 suction 후보점 생성.
+  candidates:
+    count: 8
+    min_distance_px: 50.0
+    pca_offset_px: 50.0
 
-  # mask center normal과 같은 면 connected component를 찾고, 그 면 중심으로 suction point를 이동한다.
-  normal_surface_enabled: true
-  normal_seed_window: 11
-  surface_angle_threshold_deg: 30.0
-  min_surface_region_area_ratio: 0.03
-  min_surface_region_area_px: 1500
+  # normal surface를 찾아 suction point를 면 중심으로 이동한다.
+  normal_surface:
+    enabled: true
+    angle_threshold_deg: 15.0
 
-  # 선택된 면 중심에서 dual-cup + 중간 capsule suction area가 object/normal surface 안에 들어오는 최소 비율.
-  # 실패하면 다음 suction candidate seed의 normal surface를 다시 평가한다.
-  min_suction_area_object_coverage: 0.9
-  min_suction_area_surface_coverage: 0.5
+    cluster:
+      max_count: 5
 
-  # normal surface의 장축을 구할 때 minAreaRect를 우선 사용하고, 불안정하면 PCA/object mask로 fallback한다.
-  axis_min_area_px: 20
-  axis_min_rect_ratio: 1.2
-  axis_min_pca_ratio: 2.5
-  axis_reference_step_px: 20.0
+    morphology:
+      open_kernel_px: 1
+      close_kernel_px: 1
+
+    center:
+      method: rect_center
+      rect_max_area_ratio: 2.0
+
+    min_region:
+      area_ratio: 0.1
+      area_px: 3000.0
+
+  # 실험/내부 튜닝값. 평소에는 위 strategy/cup/candidates/normal_surface 위주로 조정한다.
+  advanced:
+    # suction point 주변 depth/normal 계산 window(pixel).
+    depth_window: 10
+    normal_window: 20
+
+    candidate_min_offset_px: 5.0
+    candidate_clearance_offset_ratio: 0.8
+
+    # 현재 footprint는 선택 reject 기준으로 쓰지 않고 debug/시각화용으로만 남긴다.
+    footprint:
+      min_cup_inside_ratio: 0.75
+      min_object_coverage: 0.8
+      min_surface_coverage: 0.5
+
+    # normal surface의 장축을 구할 때 minAreaRect를 우선 사용하고, 불안정하면 PCA/object mask로 fallback한다.
+    axis:
+      min_area_px: 20
+      min_rect_ratio: 1.2
+      min_pca_ratio: 2.5
+      reference_step_px: 20.0

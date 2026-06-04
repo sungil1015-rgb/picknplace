@@ -1,24 +1,26 @@
 priority:
   # support_then_depth: center/clearance/area로 1차 후보군을 만들고, 그 후보군 안에서 depth가 가장 가까운 물체를 최종 선택한다.
   mode: support_then_depth
-  depth_weight: 0.55
+  depth_weight: 0.55 #현재는 안쓰임
 
   # 물체 중심이 박스 중심에 가까울수록 높게 주는 가중치. 너무 키우면 중앙 물체만 과하게 선호.
-  center_weight: 0.00
+  center_weight: 0.30
 
   # 타겟 마스크 주변에 다른 물체가 얼마나 떨어져 있는지 보는 가중치. 클수록 주변이 비어 있는 물체를 선호한다.
-  clearance_weight: 0.70
+  clearance_weight: 0.40
 
   # 마스크 면적의 절대값이 아니라, 현재 프레임 안에서 면적 순위로 주는 가중치. 클수록 큰 물체를 선호한다.
   area_weight: 0.30
 
   # 1차 support score 최고점에서 이 값만큼 낮은 물체까지 depth 비교 후보로 포함한다.
   # 작을수록 1차 점수가 거의 최고인 물체만 depth 비교하고, 클수록 더 많은 물체가 depth 비교에 들어온다.
-  depth_candidate_score_margin: 0.40
+  depth_candidate_score_margin: 0.30
 
   # 마스크 안 depth 값 중 몇 percentile을 물체 depth로 쓸지 결정한다.
   # 낮을수록 카메라에 가까운 표면을 더 강하게 보고, 높을수록 평균적인 깊이에 가까워진다.
-  depth_percentile: 20.0
+  depth_percentile: 10.0
+  depth_percentile_by_class:
+    4: 3.0
 
   # depth 계산 전에 마스크 가장자리를 깎는 kernel 크기. 경계 depth 노이즈와 배경 섞임을 줄인다.
   erosion_kernel: 1

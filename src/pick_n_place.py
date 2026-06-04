@@ -57,6 +57,18 @@ def _required(mapping: dict[str, Any], key: str, section_name: str) -> Any:
     return mapping[key]
 
 
+def _class_float_mapping(mapping: Any) -> dict[int, float]:
+    if not isinstance(mapping, dict):
+        return {}
+    parsed: dict[int, float] = {}
+    for key, value in mapping.items():
+        try:
+            parsed[int(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return parsed
+
+
 class PickNPlace:
     def __init__(
             self,
@@ -163,6 +175,7 @@ class PickNPlace:
                 mode=str(_required(priority_cfg, "mode", "priority")),
                 depth_candidate_score_margin=float(_required(priority_cfg, "depth_candidate_score_margin", "priority")),
                 depth_percentile=float(_required(priority_cfg, "depth_percentile", "priority")),
+                depth_percentile_by_class=_class_float_mapping(priority_cfg.get("depth_percentile_by_class", {})),
                 erosion_kernel=int(_required(priority_cfg, "erosion_kernel", "priority")),
                 clearance_max_distance=float(_required(priority_cfg, "clearance_max_distance", "priority")),
             )

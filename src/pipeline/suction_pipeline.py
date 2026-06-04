@@ -14,9 +14,10 @@ from src.utils.geometry import (
     transform_normal,
     transform_point,
 )
+from src.utils.class4_bottle import estimate_class4_bottle_surface
 from src.utils.depth import median_valid_depth_at_point
 from src.utils.mask import largest_component_mask, mask_center_point
-from src.utils.normal import connected_normal_surface
+from src.utils.normal_surface import clustered_normal_surface_candidates
 from src.utils.suction_evaluation import (
     normal_z_score,
     suction_area_coverage,
@@ -39,16 +40,25 @@ class SuctionPipeline:
         self.cup_diameter_mm = float(config.cup_diameter_mm)
         self.cup_center_spacing_mm = float(config.cup_center_spacing_mm)
         self.min_cup_inside_ratio = float(config.min_cup_inside_ratio)
+        self.suction_strategy_default = self._normalize_suction_strategy(config.suction_strategy_default)
+        self.suction_strategy_by_class = {
+            int(class_index): self._normalize_suction_strategy(strategy)
+            for class_index, strategy in config.suction_strategy_by_class.items()
+        }
         self.candidate_count = int(config.candidate_count)
         self.candidate_min_distance_px = float(config.candidate_min_distance_px)
         self.pca_offset_px = float(config.pca_offset_px)
         self.candidate_min_offset_px = float(config.candidate_min_offset_px)
         self.candidate_clearance_offset_ratio = float(config.candidate_clearance_offset_ratio)
         self.normal_surface_enabled = bool(config.normal_surface_enabled)
-        self.normal_seed_window = int(config.normal_seed_window)
         self.surface_angle_threshold_deg = float(config.surface_angle_threshold_deg)
+        self.surface_open_kernel_px = int(config.surface_open_kernel_px)
+        self.surface_close_kernel_px = int(config.surface_close_kernel_px)
+        self.surface_center_method = str(config.surface_center_method)
+        self.surface_rect_max_area_ratio = float(config.surface_rect_max_area_ratio)
         self.min_surface_region_area_ratio = float(config.min_surface_region_area_ratio)
         self.min_surface_region_area_px = int(config.min_surface_region_area_px)
+        self.normal_cluster_max_count = int(config.normal_cluster_max_count)
         self.min_suction_area_object_coverage = float(config.min_suction_area_object_coverage)
         self.min_suction_area_surface_coverage = float(config.min_suction_area_surface_coverage)
         self.axis_min_area_px = int(config.axis_min_area_px)
@@ -77,7 +87,14 @@ class SuctionPipeline:
                 suction_points.append([])
                 continue
 
-            point, footprint, candidates, surface_debug = self._compute_one(mask, depth_image, normal_image, intrinsic, extrinsic)
+            point, footprint, candidates, surface_debug = self._compute_one(
+                instance,
+                mask,
+                depth_image,
+                normal_image,
+                intrinsic,
+                extrinsic,
+            )
             setattr(instance, "suction_footprint", footprint.to_dict() if footprint is not None else None)
             setattr(instance, "suction_candidates", candidates)
             setattr(instance, "suction_surface", surface_debug)
@@ -86,6 +103,7 @@ class SuctionPipeline:
 
     def _compute_one(
         self,
+        instance: Any,
         mask: np.ndarray,
         depth_image: np.ndarray,
         normal_image: np.ndarray | None,
@@ -101,38 +119,49 @@ class SuctionPipeline:
         if not candidates:
             return None, None, [], None
 
-        if self.normal_surface_enabled and normal_image is not None:
-            selected, failure_debug = self._select_normal_surface_suction(binary_mask, depth_image, normal_image, intrinsic, candidates)
+        strategy = self._suction_strategy_for_instance(instance)
+        class4_failure_debug = None
+        if strategy == "mask":
+            selected = self._select_mask_suction(binary_mask, depth_image, intrinsic, candidates)
+            if selected is None:
+                return None, None, candidates, {"passed": False, "reason": "mask_suction_failed", "suction_strategy": "mask"}
+            u, v, depth_mm, footprint, surface_debug = selected
+        elif strategy == "class4_bottle":
+            selected, class4_failure_debug = self._select_class4_bottle_suction(binary_mask, depth_image, normal_image, intrinsic)
             if selected is not None:
                 u, v, depth_mm, footprint, surface_debug = selected
-                candidates.insert(1, {"xy": [int(u), int(v)], "source": "normal_surface_center"})
+                candidates.insert(1, {"xy": [int(u), int(v)], "source": "class4_bottle_center"})
+            elif self.normal_surface_enabled and normal_image is not None:
+                selected = None
             else:
-                return None, None, candidates, failure_debug
+                return None, None, candidates, class4_failure_debug
         else:
-            u, v = candidates[0]["xy"]
-            surface_debug = self._move_to_center_normal_surface(binary_mask, normal_image, u, v)
-            if surface_debug is not None and surface_debug.get("passed"):
-                u, v = surface_debug["surface_center_xy"]
-                candidates.insert(1, {"xy": [int(u), int(v)], "source": "normal_surface_center"})
+            selected = None
 
-            depth_mm = median_valid_depth_at_point(depth_image, u, v, binary_mask, window=self.depth_window)
-            if depth_mm is None:
-                return None, None, candidates, surface_debug
-
-            footprint = compute_dual_cup_footprint(
-                binary_mask,
-                (u, v),
-                depth_mm,
-                intrinsic,
-                cup_diameter_mm=self.cup_diameter_mm,
-                cup_center_spacing_mm=self.cup_center_spacing_mm,
-                min_cup_inside_ratio=self.min_cup_inside_ratio,
-            )
-            if footprint is not None:
-                suction_area = dual_cup_capsule_mask(binary_mask.shape, footprint) & (binary_mask > 0)
-                if surface_debug is None:
-                    surface_debug = {}
-                surface_debug["suction_area_pixels"] = int(np.count_nonzero(suction_area))
+        if strategy == "normal" or (strategy == "class4_bottle" and selected is None):
+            if self.normal_surface_enabled and normal_image is not None:
+                selected, failure_debug = self._select_normal_surface_suction(
+                    binary_mask,
+                    depth_image,
+                    normal_image,
+                    intrinsic,
+                    extrinsic,
+                )
+                if selected is not None:
+                    u, v, depth_mm, footprint, surface_debug = selected
+                    candidates.insert(1, {"xy": [int(u), int(v)], "source": "normal_surface_center"})
+                    if class4_failure_debug is not None:
+                        surface_debug["class4_bottle_fallback"] = class4_failure_debug
+                else:
+                    if class4_failure_debug is not None and failure_debug is not None:
+                        failure_debug["class4_bottle_fallback"] = class4_failure_debug
+                    return None, None, candidates, failure_debug
+            else:
+                selected = self._select_mask_suction(binary_mask, depth_image, intrinsic, candidates)
+                if selected is None:
+                    return None, None, candidates, {"passed": False, "reason": "mask_suction_failed", "suction_strategy": "mask_fallback"}
+                u, v, depth_mm, footprint, surface_debug = selected
+                surface_debug["suction_strategy"] = "mask_fallback"
 
         point_camera = pixel_to_camera(u, v, depth_mm, intrinsic)
         point_robot = transform_point(point_camera, extrinsic)
@@ -160,28 +189,153 @@ class SuctionPipeline:
             [round(float(value), 6) for value in quaternion],
         ], footprint, candidates, surface_debug
 
-    def _move_to_center_normal_surface(
+    @staticmethod
+    def _normalize_suction_strategy(strategy: Any) -> str:
+        normalized = str(strategy).strip().lower()
+        if normalized in ("mask", "2d", "2d_mask", "2dmask"):
+            return "mask"
+        if normalized in ("class4", "class4_bottle", "bottle"):
+            return "class4_bottle"
+        return "normal"
+
+    def _suction_strategy_for_instance(self, instance: Any) -> str:
+        class_index = self._class_index(instance)
+        if class_index is not None and class_index in self.suction_strategy_by_class:
+            return self.suction_strategy_by_class[class_index]
+        return self.suction_strategy_default
+
+    @staticmethod
+    def _class_index(instance: Any) -> int | None:
+        for attr in ("class_index", "label"):
+            value = getattr(instance, attr, None)
+            try:
+                if value is not None and int(value) == 4:
+                    return int(value)
+                if value is not None:
+                    return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    @staticmethod
+    def _is_class4_instance(instance: Any) -> bool:
+        return SuctionPipeline._class_index(instance) == 4
+
+    def _select_mask_suction(
         self,
         mask: np.ndarray,
-        normal_image: np.ndarray | None,
-        u: int,
-        v: int,
-    ) -> dict[str, Any] | None:
-        if not self.normal_surface_enabled or normal_image is None:
+        depth_image: np.ndarray,
+        intrinsic: np.ndarray,
+        candidates: list[dict[str, Any]],
+    ) -> tuple[int, int, float, SuctionFootprint | None, dict[str, Any]] | None:
+        if not candidates:
             return None
-        try:
-            _, debug = connected_normal_surface(
-                normal_image,
-                mask,
-                (u, v),
-                seed_window=self.normal_seed_window,
-                angle_threshold_deg=self.surface_angle_threshold_deg,
-                min_area_ratio=self.min_surface_region_area_ratio,
-                min_area_px=self.min_surface_region_area_px,
-            )
-            return debug
-        except Exception as exc:
-            return {"passed": False, "reason": f"normal_surface_error: {exc}"}
+        u, v = candidates[0]["xy"]
+        depth_mm = median_valid_depth_at_point(depth_image, u, v, mask, window=self.depth_window)
+        if depth_mm is None:
+            return None
+        footprint = compute_dual_cup_footprint(
+            mask,
+            (u, v),
+            depth_mm,
+            intrinsic,
+            cup_diameter_mm=self.cup_diameter_mm,
+            cup_center_spacing_mm=self.cup_center_spacing_mm,
+            min_cup_inside_ratio=self.min_cup_inside_ratio,
+        )
+        surface_debug: dict[str, Any] = {
+            "passed": True,
+            "reason": None,
+            "selected": True,
+            "selection_reason": "2d_mask_candidate",
+            "suction_strategy": "mask",
+            "candidate_index": 0,
+            "candidate_source": str(candidates[0].get("source", "unknown")),
+            "surface_center_xy": [int(u), int(v)],
+            "surface_area": int(np.count_nonzero(mask)),
+            "object_area": int(np.count_nonzero(mask)),
+            "surface_area_ratio": 1.0,
+            "suction_footprint_check_used": False,
+        }
+        if footprint is not None:
+            suction_area = dual_cup_capsule_mask(mask.shape, footprint) & (mask > 0)
+            surface_debug["suction_area_pixels"] = int(np.count_nonzero(suction_area))
+        return int(u), int(v), float(depth_mm), footprint, surface_debug
+
+    def _select_class4_bottle_suction(
+        self,
+        mask: np.ndarray,
+        depth_image: np.ndarray,
+        normal_image: np.ndarray | None,
+        intrinsic: np.ndarray,
+    ) -> tuple[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]] | None, dict[str, Any] | None]:
+        estimate = estimate_class4_bottle_surface(mask, depth_image, normal_image, intrinsic)
+        estimate_debug = estimate.to_debug_dict()
+        if not estimate.passed or estimate.point_xy is None or estimate.depth_mm is None or estimate.normal_camera is None:
+            return None, {
+                "passed": False,
+                "reason": estimate.reason or "class4_bottle_estimate_failed",
+                "class4_bottle": estimate_debug,
+            }
+
+        u, v = estimate.point_xy
+        normal_camera = np.asarray(estimate.normal_camera, dtype=np.float64)
+        axis_xy, axis_debug = self._class4_object_axis(mask)
+        footprint, suction_area = compute_projected_dual_cup_footprint(
+            mask,
+            (u, v),
+            float(estimate.depth_mm),
+            intrinsic,
+            normal_camera,
+            cup_diameter_mm=self.cup_diameter_mm,
+            cup_center_spacing_mm=self.cup_center_spacing_mm,
+            min_cup_inside_ratio=self.min_cup_inside_ratio,
+            axis_xy=axis_xy,
+        )
+        surface = mask > 0
+        coverage = suction_area_coverage(
+            mask,
+            surface,
+            footprint,
+            self.min_suction_area_object_coverage,
+            self.min_suction_area_surface_coverage,
+            suction_area=suction_area,
+        )
+        surface_debug: dict[str, Any] = {
+            "passed": True,
+            "reason": None,
+            "selected": True,
+            "selection_reason": "class4_bottle_cap_plane_intersection",
+            "candidate_index": 0,
+            "candidate_source": "class4_bottle",
+            "seed_xy": [int(u), int(v)],
+            "component_seed_xy": [int(u), int(v)],
+            "surface_center_xy": [int(u), int(v)],
+            "surface_area": int(np.count_nonzero(surface)),
+            "object_area": int(np.count_nonzero(mask)),
+            "surface_area_ratio": 1.0,
+            "seed_normal": [float(value) for value in normal_camera],
+            "normal_z_score": normal_z_score({"seed_normal": [float(value) for value in normal_camera]}),
+            "footprint_projection": "class4_bottle_normal_projected_ellipse",
+            "suction_area_check": coverage,
+            "suction_area_pixels": int(coverage.get("suction_area_pixels", 0)),
+            "suction_footprint_check_used": False,
+            "class4_bottle": estimate_debug,
+        }
+        surface_debug.update(axis_debug)
+
+        return (int(u), int(v), float(estimate.depth_mm), footprint, surface_debug), None
+
+    def _class4_object_axis(self, mask: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+        axis, debug = self._surface_axis_or_fallback(mask, mask)
+        source = debug.get("footprint_axis_source")
+        if source == "normal_surface_min_area_rect":
+            debug["footprint_axis_source"] = "class4_object_mask_min_area_rect"
+        elif source == "normal_surface_pca_fallback":
+            debug["footprint_axis_source"] = "class4_object_mask_pca_fallback"
+        elif source == "object_mask_fallback":
+            debug["footprint_axis_source"] = "class4_object_mask_fallback"
+        return axis, debug
 
     def _select_normal_surface_suction(
         self,
@@ -189,21 +343,46 @@ class SuctionPipeline:
         depth_image: np.ndarray,
         normal_image: np.ndarray | None,
         intrinsic: np.ndarray,
-        candidates: list[dict[str, Any]],
-    ) -> tuple[tuple[int, int, float, SuctionFootprint, dict[str, Any]] | None, dict[str, Any] | None]:
+        extrinsic: np.ndarray,
+    ) -> tuple[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]] | None, dict[str, Any] | None]:
         if not self.normal_surface_enabled or normal_image is None:
             return None, None
 
-        attempts: list[dict[str, Any]] = []
-        passed_options: list[tuple[int, int, float, SuctionFootprint, dict[str, Any]]] = []
-        for index, candidate in enumerate(candidates):
-            seed_u, seed_v = candidate["xy"]
-            surface, surface_debug = self._normal_surface_from_seed(mask, normal_image, seed_u, seed_v)
-            surface_debug["candidate_index"] = int(index)
-            surface_debug["candidate_source"] = str(candidate.get("source", "unknown"))
+        return self._select_clustered_normal_surface_suction(
+            mask,
+            depth_image,
+            normal_image,
+            intrinsic,
+            extrinsic,
+        )
 
+    def _select_clustered_normal_surface_suction(
+        self,
+        mask: np.ndarray,
+        depth_image: np.ndarray,
+        normal_image: np.ndarray,
+        intrinsic: np.ndarray,
+        extrinsic: np.ndarray,
+    ) -> tuple[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]] | None, dict[str, Any] | None]:
+        attempts: list[dict[str, Any]] = []
+        passed_options: list[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]]] = []
+        surfaces = clustered_normal_surface_candidates(
+            normal_image,
+            mask,
+            angle_threshold_deg=self.surface_angle_threshold_deg,
+            min_area_ratio=self.min_surface_region_area_ratio,
+            min_area_px=self.min_surface_region_area_px,
+            max_clusters=self.normal_cluster_max_count,
+            open_kernel_px=self.surface_open_kernel_px,
+            close_kernel_px=self.surface_close_kernel_px,
+            center_method=self.surface_center_method,
+            rect_max_area_ratio=self.surface_rect_max_area_ratio,
+        )
+        for index, (surface, surface_debug) in enumerate(surfaces):
+            surface_debug["candidate_index"] = int(index)
+            surface_debug["candidate_source"] = "normal_cluster"
             if surface is None or not surface_debug.get("passed"):
-                surface_debug["suction_reject_reason"] = surface_debug.get("reason", "normal_surface_rejected")
+                surface_debug["suction_reject_reason"] = surface_debug.get("reason", "normal_cluster_rejected")
                 attempts.append(surface_debug)
                 continue
 
@@ -233,26 +412,11 @@ class SuctionPipeline:
             )
             surface_debug["suction_area_check"] = coverage
             surface_debug["suction_area_pixels"] = int(coverage.get("suction_area_pixels", 0))
-
-            if footprint is None:
-                surface_debug["passed"] = False
-                surface_debug["suction_reject_reason"] = "invalid_footprint"
-                attempts.append(surface_debug)
-                continue
-            if not footprint.feasible:
-                surface_debug["passed"] = False
-                surface_debug["suction_reject_reason"] = footprint.reason or "footprint_rejected"
-                attempts.append(surface_debug)
-                continue
-            if not coverage.get("passed", False):
-                surface_debug["passed"] = False
-                surface_debug["suction_reject_reason"] = coverage.get("reason", "suction_area_coverage_rejected")
-                attempts.append(surface_debug)
-                continue
-
+            surface_debug["suction_footprint_check_used"] = False
             surface_debug["passed"] = True
             surface_debug["reason"] = None
             surface_debug["normal_z_score"] = normal_z_score(surface_debug)
+            surface_debug["robot_z_tilt_deg"] = self._robot_z_tilt_deg(surface_debug, extrinsic)
             attempts.append(surface_debug)
             passed_options.append((int(u), int(v), float(depth_mm), footprint, surface_debug))
 
@@ -260,13 +424,14 @@ class SuctionPipeline:
             selected = max(
                 passed_options,
                 key=lambda item: (
-                    normal_z_score(item[4]),
+                    -float(item[4].get("robot_z_tilt_deg", 180.0)),
+                    int(item[4].get("surface_area", 0)),
                     -int(item[4].get("candidate_index", 0)),
                 ),
             )
             selected_debug = dict(selected[4])
             selected_debug["selected"] = True
-            selected_debug["selection_reason"] = "max_normal_z_among_passed_candidates"
+            selected_debug["selection_reason"] = "min_robot_z_tilt_among_clustered_surfaces"
             selected_debug["attempts"] = [
                 {
                     **dict(attempt),
@@ -276,27 +441,25 @@ class SuctionPipeline:
             ]
             return (selected[0], selected[1], selected[2], selected[3], selected_debug), None
 
-        return None, {"passed": False, "reason": "no_suction_surface_passed", "attempts": attempts}
+        return None, {
+            "passed": False,
+            "reason": "no_normal_cluster_surface_passed",
+            "normal_surface_mode": "clustered",
+            "attempts": attempts,
+        }
 
-    def _normal_surface_from_seed(
-        self,
-        mask: np.ndarray,
-        normal_image: np.ndarray,
-        u: int,
-        v: int,
-    ) -> tuple[np.ndarray | None, dict[str, Any]]:
-        try:
-            return connected_normal_surface(
-                normal_image,
-                mask,
-                (u, v),
-                seed_window=self.normal_seed_window,
-                angle_threshold_deg=self.surface_angle_threshold_deg,
-                min_area_ratio=self.min_surface_region_area_ratio,
-                min_area_px=self.min_surface_region_area_px,
-            )
-        except Exception as exc:
-            return None, {"passed": False, "reason": f"normal_surface_error: {exc}"}
+    @staticmethod
+    def _robot_z_tilt_deg(surface_debug: dict[str, Any], extrinsic: np.ndarray) -> float:
+        seed_normal = surface_debug.get("seed_normal")
+        if not isinstance(seed_normal, list) or len(seed_normal) != 3:
+            return 180.0
+        normal_camera = np.asarray(seed_normal, dtype=np.float64).reshape(3)
+        if np.linalg.norm(normal_camera) < 1e-9:
+            return 180.0
+        normal_robot = transform_normal(normal_camera, extrinsic)
+        normal_robot = orient_normal_z_up(normal_robot)
+        z = float(np.clip(normal_robot[2] / max(np.linalg.norm(normal_robot), 1e-9), -1.0, 1.0))
+        return float(np.degrees(np.arccos(z)))
 
     def _compute_surface_footprint(
         self,

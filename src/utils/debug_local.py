@@ -22,6 +22,7 @@ from src.utils.crop import DEFAULT_SEGMENTATION_ROI_2013
 from src.utils.depth import median_valid_depth_at_point
 from src.utils.geometry import quaternion_to_rotation_matrix
 from src.utils.mask import largest_component_mask, mask_center_point
+from src.utils.suction_evaluation import normal_z_score
 from src.utils.suction_footprint import (
     compute_dual_cup_footprint,
 )
@@ -151,6 +152,34 @@ def _draw_xyz_axes(
             origin_xy, end_xy = projected
         cv2.arrowedLine(image, origin_xy, end_xy, color, 2, cv2.LINE_AA, tipLength=0.25)
         cv2.putText(image, label, end_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2, cv2.LINE_AA)
+
+
+def _draw_z_axis(
+    image: np.ndarray,
+    anchor: tuple[int, int],
+    quaternion_xyzw: Any,
+    intrinsic: np.ndarray | None = None,
+    extrinsic: np.ndarray | None = None,
+    origin_robot_xyz: Any = None,
+    scale: int = 30,
+) -> None:
+    quaternion = np.asarray(quaternion_xyzw, dtype=np.float64).reshape(4)
+    rotation = quaternion_to_rotation_matrix(quaternion)
+    z_axis = rotation.T[2]
+    projected = _project_robot_axis(anchor, z_axis, intrinsic, extrinsic, origin_robot_xyz, scale_mm=float(scale))
+    if projected is None:
+        origin = np.asarray(anchor, dtype=np.int32)
+        direction = np.asarray([z_axis[0], z_axis[1]], dtype=np.float64)
+        norm = np.linalg.norm(direction)
+        if norm < 1e-9:
+            return
+        end = origin + np.round(direction / norm * scale).astype(np.int32)
+        origin_xy = tuple(origin)
+        end_xy = (int(end[0]), int(end[1]))
+    else:
+        origin_xy, end_xy = projected
+    cv2.arrowedLine(image, origin_xy, end_xy, (255, 0, 0), 2, cv2.LINE_AA, tipLength=0.25)
+    cv2.putText(image, "Z", end_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 0, 0), 2, cv2.LINE_AA)
 
 
 def _project_robot_axis(
@@ -408,6 +437,7 @@ def _render_debug(
     result: dict[str, Any],
     predictions: list[Any],
     suction_pipeline: Any | None,
+    suction_debug_top_k: int,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     overlay = image.copy()
     polygons = result.get("result_data", [])
@@ -422,22 +452,25 @@ def _render_debug(
 
         class_id = class_ids[index] if index < len(class_ids) else None
         is_grasp_target = index == 0
+        is_suction_debug_target = index < suction_debug_top_k
         color = (0, 0, 255) if is_grasp_target else _class_color(class_id)
-        thickness = 5 if is_grasp_target else 3
+        thickness = 4 if is_grasp_target else 2
         cv2.polylines(overlay, [points], True, color, thickness, cv2.LINE_AA)
 
         prediction = predictions[index] if index < len(predictions) else None
         grasp_xy = _grasp_pixel(prediction, polygon) if prediction is not None else _grasp_pixel(None, polygon)
+        point_list = suction_points[index] if index < len(suction_points) else []
+        has_suction_point = bool(point_list)
         footprint_debug = {}
-        if is_grasp_target:
-            cv2.circle(overlay, grasp_xy, 15, (255, 255, 255), 3, cv2.LINE_AA)
+        if is_suction_debug_target and has_suction_point:
+            cv2.circle(overlay, grasp_xy, 8 if is_grasp_target else 6, (255, 255, 255), 2, cv2.LINE_AA)
             cv2.drawMarker(
                 overlay,
                 grasp_xy,
                 color,
                 markerType=cv2.MARKER_CROSS,
-                markerSize=34,
-                thickness=4,
+                markerSize=20 if is_grasp_target else 16,
+                thickness=2,
                 line_type=cv2.LINE_AA,
             )
             footprint_debug = _draw_dual_cup_footprint(
@@ -449,18 +482,19 @@ def _render_debug(
                 color,
                 suction_pipeline,
             )
-            _draw_grasp_target_label(overlay, points, prediction, color)
+            if is_grasp_target:
+                _draw_grasp_target_label(overlay, points, prediction, color)
         else:
             cv2.circle(overlay, grasp_xy, 8, (0, 0, 0), -1, cv2.LINE_AA)
             cv2.circle(overlay, grasp_xy, 5, color, -1, cv2.LINE_AA)
 
         grasp_xyz = None
-        point_list = suction_points[index] if index < len(suction_points) else []
-        if point_list:
+        if has_suction_point:
             point = point_list[0]
             if isinstance(point, (list, tuple)) and len(point) >= 2:
                 grasp_xyz = point[0]
-                _draw_xyz_axes(overlay, grasp_xy, point[1], intrinsic=intrinsic, extrinsic=extrinsic, origin_robot_xyz=grasp_xyz)
+                if is_suction_debug_target:
+                    _draw_z_axis(overlay, grasp_xy, point[1], intrinsic=intrinsic, extrinsic=extrinsic, origin_robot_xyz=grasp_xyz)
 
         if not is_grasp_target:
             _draw_class_label(overlay, class_id, tuple(points[0].tolist()), color)
@@ -469,6 +503,7 @@ def _render_debug(
             {
                 "rank": index + 1,
                 "is_grasp_target": is_grasp_target,
+                "is_suction_debug_target": is_suction_debug_target,
                 "class_id": class_id,
                 "polygon": [[int(x), int(y)] for x, y in points.tolist()],
                 "grasp_xy": [int(grasp_xy[0]), int(grasp_xy[1])],
@@ -492,9 +527,19 @@ def _save_debug_result(
     result: dict[str, Any],
     predictions: list[Any],
     suction_pipeline: Any | None,
+    suction_debug_top_k: int,
 ) -> None:
     relative_name = "_".join(sample_dir.parts[-2:]) if len(sample_dir.parts) >= 2 else sample_dir.name
-    overlay, summaries = _render_debug(image, depth_image, intrinsic, extrinsic, result, predictions, suction_pipeline)
+    overlay, summaries = _render_debug(
+        image,
+        depth_image,
+        intrinsic,
+        extrinsic,
+        result,
+        predictions,
+        suction_pipeline,
+        suction_debug_top_k,
+    )
 
     output_root.mkdir(parents=True, exist_ok=True)
     image_path = output_root / f"{relative_name}_debug.png"
@@ -512,6 +557,43 @@ def _save_debug_result(
             ensure_ascii=False,
             indent=2,
         )
+
+
+def _compute_debug_suction_top_k(
+    model: PickNPlace,
+    result: dict[str, Any],
+    predictions: list[Any],
+    depth_image: np.ndarray | None,
+    normal_image: np.ndarray | None,
+    top_k: int,
+) -> None:
+    if top_k <= 0 or not predictions:
+        result["suction_points"] = [[] for _ in predictions]
+        result["pts_per_object"] = [0 for _ in predictions]
+        return
+
+    for prediction in predictions:
+        prediction.suction_footprint = None
+        prediction.suction_candidates = []
+        prediction.suction_surface = None
+        prediction.suction_normal_z_score = None
+
+    target_count = min(int(top_k), len(predictions))
+    suction_points = [[] for _ in predictions]
+    computed_points = model.suction_pipeline.compute(
+        predictions[:target_count],
+        depth_image,
+        normal_image,
+        model.c_matrix,
+        model.extrinsic,
+    )
+    for index, point_list in enumerate(computed_points):
+        suction_points[index] = point_list
+        surface_debug = getattr(predictions[index], "suction_surface", None)
+        predictions[index].suction_normal_z_score = normal_z_score(surface_debug) if isinstance(surface_debug, dict) else None
+
+    result["suction_points"] = suction_points
+    result["pts_per_object"] = [len(points) for points in suction_points]
 
 
 def run_debug(args: argparse.Namespace) -> None:
@@ -555,8 +637,16 @@ def run_debug(args: argparse.Namespace) -> None:
             image,
             depth_image=depth,
             normal_image=normal,
-            compute_suction_pts=True,
+            compute_suction_pts=False,
             roi_2d=DEBUG_ROI_2013,
+        )
+        _compute_debug_suction_top_k(
+            model,
+            result,
+            predictions,
+            depth,
+            normal,
+            top_k=args.suction_top_k,
         )
         run_elapsed = time.perf_counter() - run_start
 
@@ -571,6 +661,7 @@ def run_debug(args: argparse.Namespace) -> None:
             result,
             predictions,
             model.suction_pipeline,
+            args.suction_top_k,
         )
         save_elapsed = time.perf_counter() - save_start
         total_elapsed = time.perf_counter() - sample_start
@@ -594,6 +685,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--info", default="img/info.json", help="camera info json for intrinsic values")
     parser.add_argument("--cuda", default=None, help="GPU id, or -1/cpu for CPU")
     parser.add_argument("--limit", type=int, default=None, help="process only the first N samples")
+    parser.add_argument("--suction-top-k", type=int, default=5, help="compute and draw suction for the top N priority objects")
     return parser.parse_args()
 
 

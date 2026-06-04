@@ -10,6 +10,21 @@ def _required(mapping: dict[str, Any], key: str) -> Any:
     return mapping[key]
 
 
+def _section(mapping: dict[str, Any], key: str) -> dict[str, Any]:
+    value = mapping.get(key, {})
+    return value if isinstance(value, dict) else {}
+
+
+def _get(mapping: dict[str, Any], section: dict[str, Any], section_key: str, flat_key: str, default: Any = None) -> Any:
+    if section_key in section:
+        return section[section_key]
+    if flat_key in mapping:
+        return mapping[flat_key]
+    if default is not None:
+        return default
+    raise ValueError(f"suction config missing required key: {flat_key}")
+
+
 def as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -34,11 +49,17 @@ class SuctionConfig:
     cup_diameter_mm: float
     cup_center_spacing_mm: float
     min_cup_inside_ratio: float
+    suction_strategy_default: str
+    suction_strategy_by_class: dict[int, str]
     normal_surface_enabled: bool
-    normal_seed_window: int
     surface_angle_threshold_deg: float
+    surface_open_kernel_px: int
+    surface_close_kernel_px: int
+    surface_center_method: str
+    surface_rect_max_area_ratio: float
     min_surface_region_area_ratio: float
     min_surface_region_area_px: int
+    normal_cluster_max_count: int
     min_suction_area_object_coverage: float
     min_suction_area_surface_coverage: float
     axis_min_area_px: int
@@ -48,26 +69,59 @@ class SuctionConfig:
 
     @classmethod
     def from_mapping(cls, mapping: dict[str, Any]) -> "SuctionConfig":
+        strategy_cfg = mapping.get("strategy", mapping.get("suction_strategy", {}))
+        cup_cfg = _section(mapping, "cup")
+        candidate_cfg = _section(mapping, "candidates")
+        normal_cfg = _section(mapping, "normal_surface")
+        cluster_cfg = _section(normal_cfg, "cluster")
+        morphology_cfg = _section(normal_cfg, "morphology")
+        center_cfg = _section(normal_cfg, "center")
+        region_cfg = _section(normal_cfg, "min_region")
+        advanced_cfg = _section(mapping, "advanced")
+        footprint_cfg = _section(advanced_cfg, "footprint")
+        axis_cfg = _section(advanced_cfg, "axis")
         return cls(
-            depth_window=int(_required(mapping, "depth_window")),
-            normal_window=int(_required(mapping, "normal_window")),
-            candidate_count=int(_required(mapping, "candidate_count")),
-            candidate_min_distance_px=float(_required(mapping, "candidate_min_distance_px")),
-            pca_offset_px=float(_required(mapping, "pca_offset_px")),
-            candidate_min_offset_px=float(_required(mapping, "candidate_min_offset_px")),
-            candidate_clearance_offset_ratio=float(_required(mapping, "candidate_clearance_offset_ratio")),
-            cup_diameter_mm=float(_required(mapping, "cup_diameter_mm")),
-            cup_center_spacing_mm=float(_required(mapping, "cup_center_spacing_mm")),
-            min_cup_inside_ratio=float(_required(mapping, "min_cup_inside_ratio")),
-            normal_surface_enabled=as_bool(_required(mapping, "normal_surface_enabled")),
-            normal_seed_window=int(_required(mapping, "normal_seed_window")),
-            surface_angle_threshold_deg=float(_required(mapping, "surface_angle_threshold_deg")),
-            min_surface_region_area_ratio=float(_required(mapping, "min_surface_region_area_ratio")),
-            min_surface_region_area_px=int(_required(mapping, "min_surface_region_area_px")),
-            min_suction_area_object_coverage=float(_required(mapping, "min_suction_area_object_coverage")),
-            min_suction_area_surface_coverage=float(_required(mapping, "min_suction_area_surface_coverage")),
-            axis_min_area_px=int(_required(mapping, "axis_min_area_px")),
-            axis_min_rect_ratio=float(_required(mapping, "axis_min_rect_ratio")),
-            axis_min_pca_ratio=float(_required(mapping, "axis_min_pca_ratio")),
-            axis_reference_step_px=float(_required(mapping, "axis_reference_step_px")),
+            depth_window=int(_get(mapping, advanced_cfg, "depth_window", "depth_window")),
+            normal_window=int(_get(mapping, advanced_cfg, "normal_window", "normal_window")),
+            candidate_count=int(_get(mapping, candidate_cfg, "count", "candidate_count")),
+            candidate_min_distance_px=float(_get(mapping, candidate_cfg, "min_distance_px", "candidate_min_distance_px")),
+            pca_offset_px=float(_get(mapping, candidate_cfg, "pca_offset_px", "pca_offset_px")),
+            candidate_min_offset_px=float(_get(mapping, advanced_cfg, "candidate_min_offset_px", "candidate_min_offset_px")),
+            candidate_clearance_offset_ratio=float(_get(mapping, advanced_cfg, "candidate_clearance_offset_ratio", "candidate_clearance_offset_ratio")),
+            cup_diameter_mm=float(_get(mapping, cup_cfg, "diameter_mm", "cup_diameter_mm")),
+            cup_center_spacing_mm=float(_get(mapping, cup_cfg, "center_spacing_mm", "cup_center_spacing_mm")),
+            min_cup_inside_ratio=float(_get(mapping, footprint_cfg, "min_cup_inside_ratio", "min_cup_inside_ratio")),
+            suction_strategy_default=str(strategy_cfg.get("default", "normal")) if isinstance(strategy_cfg, dict) else "normal",
+            suction_strategy_by_class=_strategy_by_class(strategy_cfg),
+            normal_surface_enabled=as_bool(_get(mapping, normal_cfg, "enabled", "normal_surface_enabled")),
+            surface_angle_threshold_deg=float(_get(mapping, normal_cfg, "angle_threshold_deg", "surface_angle_threshold_deg")),
+            surface_open_kernel_px=int(_get(mapping, morphology_cfg, "open_kernel_px", "surface_open_kernel_px")),
+            surface_close_kernel_px=int(_get(mapping, morphology_cfg, "close_kernel_px", "surface_close_kernel_px")),
+            surface_center_method=str(_get(mapping, center_cfg, "method", "surface_center_method")),
+            surface_rect_max_area_ratio=float(_get(mapping, center_cfg, "rect_max_area_ratio", "surface_rect_max_area_ratio")),
+            min_surface_region_area_ratio=float(_get(mapping, region_cfg, "area_ratio", "min_surface_region_area_ratio")),
+            min_surface_region_area_px=int(_get(mapping, region_cfg, "area_px", "min_surface_region_area_px")),
+            normal_cluster_max_count=int(_get(mapping, cluster_cfg, "max_count", "normal_cluster_max_count", 5)),
+            min_suction_area_object_coverage=float(_get(mapping, footprint_cfg, "min_object_coverage", "min_suction_area_object_coverage")),
+            min_suction_area_surface_coverage=float(_get(mapping, footprint_cfg, "min_surface_coverage", "min_suction_area_surface_coverage")),
+            axis_min_area_px=int(_get(mapping, axis_cfg, "min_area_px", "axis_min_area_px")),
+            axis_min_rect_ratio=float(_get(mapping, axis_cfg, "min_rect_ratio", "axis_min_rect_ratio")),
+            axis_min_pca_ratio=float(_get(mapping, axis_cfg, "min_pca_ratio", "axis_min_pca_ratio")),
+            axis_reference_step_px=float(_get(mapping, axis_cfg, "reference_step_px", "axis_reference_step_px")),
         )
+
+
+def _strategy_by_class(strategy_cfg: Any) -> dict[int, str]:
+    if not isinstance(strategy_cfg, dict):
+        return {}
+    by_class = strategy_cfg.get("by_class", {})
+    if not isinstance(by_class, dict):
+        return {}
+    parsed: dict[int, str] = {}
+    for key, value in by_class.items():
+        try:
+            class_index = int(key)
+        except (TypeError, ValueError):
+            continue
+        parsed[class_index] = str(value)
+    return parsed
