@@ -1,9 +1,9 @@
 extrinsic:
   # Calibration values from README. rotation_order is applied x -> y -> z.
   rotation_order: xyz
-  cal_x: -881.97
-  cal_y: 72.227
-  cal_z: 838.867
-  cal_rx: 178.454
-  cal_ry: -1.685
-  cal_rz: -90.682
+  cal_x: -769.535
+  cal_y: 67.067
+  cal_z: 985.249
+  cal_rx: 178.829
+  cal_ry: 1.087
+  cal_rz: -87.351
