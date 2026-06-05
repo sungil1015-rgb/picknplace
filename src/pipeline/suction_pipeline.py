@@ -88,6 +88,23 @@ class SuctionPipeline:
         intrinsic: np.ndarray,
         extrinsic: np.ndarray,
     ) -> list[list[list[list[float]]]]:
+        # ═══ team1 파지점 로직 연결 (전 클래스) — 2026-06-05 ════════════════════
+        # 모든 인스턴스의 흡착 파지점을 team1 compute_pick 으로 계산해 main 형식 반환.
+        #   label==4 → 병 경로(cylinder/cap),  그 외 → 일반 흡착 경로.
+        # 기존 teammate 구현(_compute_one 등)은 아래에 보존됨 — 이 블록만 지우면 복귀.
+        # (rgb 미전달=None: 동작하되 병 캡 밝기 prior만 약화. 정확도 원하면 rgb 연결.)
+        import os as _os, sys as _sys
+        _scripts = _os.path.join(_os.path.dirname(__file__), "..", "..", "scripts")
+        if _scripts not in _sys.path:
+            _sys.path.insert(0, _scripts)
+        from label_logic.main_bridge import compute_suction_points as _team1_points
+        for _inst in instances:
+            setattr(_inst, "suction_footprint", None)
+            setattr(_inst, "suction_candidates", [])
+            setattr(_inst, "suction_surface", None)
+        return _team1_points(instances, depth_image, normal_image, intrinsic, extrinsic)
+        # ═══ 이하 기존 teammate 구현 (위 return 으로 비활성) ═══════════════════════
+
         if depth_image is None:
             return [[] for _ in instances]
 

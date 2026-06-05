@@ -20,29 +20,15 @@ scripts/label_logic/main_bridge.py           # teammate 입력 → 병 파지점
 
 ## 통합 단계 (병합 후 해야 할 것)
 
-### 1) import 경로 — `scripts/`를 sys.path에 추가
-`src/pipeline/suction_pipeline.py` 상단(또는 진입점)에서:
-```python
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
-```
+### ★ 배선은 이미 적용돼 있음 (1·2단계 완료)
+이 브랜치는 `src/pipeline/suction_pipeline.py`의 `SuctionPipeline.compute()`에
+**team1 파지점 로직 연결 블록을 미리 넣어** 두었습니다. 즉 **이 브랜치를 받아 실행하면
+모든 인스턴스의 흡착 파지점이 team1 `compute_pick`으로 계산**됩니다.
+- `label == 4` → 병 경로(cylinder/cap), 그 외 → 일반 흡착 경로
+- 출력: `[[x,y,z](소수3),[qx,qy,qz,qw](소수6)]` (robot frame) — main 형식 동일
+- 기존 teammate 구현(`_compute_one` 등)은 그 아래에 **보존**됨 → 연결 블록만 지우면 원복
 
-### 2) compute() 에서 병일 때 우리 경로로 분기
-`SuctionPipeline.compute()`의 인스턴스 루프 안:
-```python
-from label_logic.main_bridge import bottle_suction_point
-
-for instance in instances:
-    label = getattr(instance, "label", None)
-    if label is not None and int(label) == 4:            # 4 = bottle (그쪽 매핑)
-        point = bottle_suction_point(
-            instance.mask, depth_image, normal_image,
-            intrinsic, extrinsic, rgb_image=None)        # rgb는 선택(3) 참고
-        suction_points.append([point] if point is not None else [])
-        continue                                          # 기존 generic/class4 경로 skip
-    # ... 기존 경로 ...
-```
-반환: `[[x,y,z](소수3), [qx,qy,qz,qw](소수6)]` (robot frame) 또는 `None`. main 형식과 동일.
+따라서 별도 import/분기 작업은 **불필요**합니다. 아래 3·4·5만 확인하세요.
 
 ### 3) (선택) rgb 전달로 캡 정확도 향상
 `compute()`는 rgb_image를 받지 않습니다. `None`이면 동작하나 병 캡 밝기 매칭/복원

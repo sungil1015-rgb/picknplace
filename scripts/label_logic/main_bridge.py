@@ -41,7 +41,7 @@ except Exception:  # pragma: no cover
 
 from . import picking as _pk
 from .picking import (
-    compute_pick, set_camera_intrinsics, BOTTLE_CID,
+    compute_pick, set_camera_intrinsics, BOTTLE_CID, UNKNOWN_CID,
 )
 from .main_suction_adapter import bottle_pick_to_suction_point
 
@@ -111,13 +111,8 @@ def _mask_to_polygon(mask) -> Optional[list]:
     return poly if len(poly) >= 3 else None
 
 
-def bottle_suction_point(mask, depth_image, normal_image, intrinsic, extrinsic,
-                         rgb_image=None) -> Optional[list]:
-    """병 인스턴스 1개 → main suction point [[x,y,z],[qx,qy,qz,qw]] 또는 None.
-
-    teammate `SuctionPipeline.compute` 에서 label==bottle 일 때 호출.
-    """
-    depth = np.asarray(depth_image)
+def _check_resolution(depth) -> None:
+    """이미지 해상도가 config camera.resolution 과 같은지 확인."""
     if depth.ndim != 2:
         raise ValueError(f"depth_image 는 (H,W) 여야 함, got {depth.shape}")
     H, W = depth.shape
@@ -127,24 +122,73 @@ def bottle_suction_point(mask, depth_image, normal_image, intrinsic, extrinsic,
             f"{(_pk.IMG_W, _pk.IMG_H)}. 같은 카메라를 쓰거나 "
             f"config/default.yaml 의 camera.resolution 을 맞추세요.")
 
-    # 카메라 intrinsics 를 이 샷 값으로 동기화 (picking/suction_score 둘 다).
-    K = np.asarray(intrinsic, dtype=np.float64)
-    set_camera_intrinsics(K[0, 0], K[1, 1], K[0, 2], K[1, 2])
 
+def _pick_point(grid, mask, cid, extrinsic) -> Optional[list]:
+    """grid + mask + cid → main suction point [[x,y,z],[qx,qy,qz,qw]] 또는 None.
+
+    cid: 병이면 BOTTLE_CID(병 경로), 그 외는 UNKNOWN_CID(일반 흡착 경로) 권장.
+    """
     polygon = _mask_to_polygon(mask)
     if polygon is None:
         return None
-
-    grid = build_grid(depth_image, normal_image, intrinsic, rgb_image)
-    result = compute_pick(grid, polygon, cid=BOTTLE_CID)
+    result = compute_pick(grid, polygon, cid=cid)
     if not result.success:
         return None
-
-    # 병 장축(원기둥 축)을 reference 로 — 흡착컵 x축 정렬용.
+    # reference(흡착컵 x축 정렬축): 병이면 원기둥 축(bottle_fit.axis_dir), 아니면 PCA 장축.
     long_axis = result.long_axis
     if result.bottle_fit and result.bottle_fit.get("axis_dir"):
         long_axis = result.bottle_fit["axis_dir"]
-
     return bottle_pick_to_suction_point(
         result.position_mm, result.normal, long_axis,
         np.asarray(extrinsic, dtype=np.float64))
+
+
+def bottle_suction_point(mask, depth_image, normal_image, intrinsic, extrinsic,
+                         rgb_image=None) -> Optional[list]:
+    """병 인스턴스 1개 → main suction point [[x,y,z],[qx,qy,qz,qw]] 또는 None.
+
+    teammate `SuctionPipeline.compute` 에서 label==bottle 일 때 호출.
+    """
+    depth = np.asarray(depth_image)
+    _check_resolution(depth)
+    K = np.asarray(intrinsic, dtype=np.float64)
+    set_camera_intrinsics(K[0, 0], K[1, 1], K[0, 2], K[1, 2])
+    grid = build_grid(depth_image, normal_image, intrinsic, rgb_image)
+    return _pick_point(grid, mask, BOTTLE_CID, extrinsic)
+
+
+def compute_suction_points(instances, depth_image, normal_image, intrinsic,
+                           extrinsic, rgb_image=None, bottle_label=4):
+    """teammate SuctionPipeline.compute 와 동일 출력 — 전 인스턴스를 우리 로직으로.
+
+    각 인스턴스의 흡착 파지점을 우리 compute_pick 으로 계산해 main 형식으로 돌려준다.
+      - label == bottle_label(기본 4) → 병 경로(BOTTLE_CID)
+      - 그 외 → 일반 흡착 경로(UNKNOWN_CID; class_prior 중립, 병 특화 skip)
+
+    Returns: list[list[suction_point]]  (= [[point] or [] for each instance])
+             teammate compute() 반환과 동일 구조.
+    """
+    if depth_image is None:
+        return [[] for _ in instances]
+    depth = np.asarray(depth_image)
+    _check_resolution(depth)
+    K = np.asarray(intrinsic, dtype=np.float64)
+    set_camera_intrinsics(K[0, 0], K[1, 1], K[0, 2], K[1, 2])
+    # grid 는 샷당 1회만 생성(인스턴스마다 재계산 X)
+    grid = build_grid(depth_image, normal_image, intrinsic, rgb_image)
+
+    out = []
+    for inst in instances:
+        mask = getattr(inst, "mask", None)
+        if mask is None:
+            out.append([])
+            continue
+        label = getattr(inst, "label", None)
+        try:
+            is_bottle = label is not None and int(label) == int(bottle_label)
+        except (TypeError, ValueError):
+            is_bottle = False
+        cid = BOTTLE_CID if is_bottle else UNKNOWN_CID
+        point = _pick_point(grid, mask, cid, extrinsic)
+        out.append([point] if point is not None else [])
+    return out
