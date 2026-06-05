@@ -37,6 +37,7 @@ class GraspPriorityScorer:
         mode: str = "weighted_sum",
         depth_candidate_score_margin: float = 0.15,
         depth_percentile: float = 20.0,
+        depth_percentile_by_class: dict[int, float] | None = None,
         erosion_kernel: int = 5,
         clearance_max_distance: float = 40.0,
     ) -> None:
@@ -47,6 +48,10 @@ class GraspPriorityScorer:
         self.mode = str(mode)
         self.depth_candidate_score_margin = float(depth_candidate_score_margin)
         self.depth_percentile = float(depth_percentile)
+        self.depth_percentile_by_class = {
+            int(class_index): float(percentile)
+            for class_index, percentile in (depth_percentile_by_class or {}).items()
+        }
         self.erosion_kernel = int(erosion_kernel)
         self.clearance_max_distance = float(clearance_max_distance)
 
@@ -143,7 +148,7 @@ class GraspPriorityScorer:
 
         center_score, center_distance = self._center_score(mask, roi_2d)
         clearance_score, clearance_distance = self._clearance_score(mask, masks)
-        object_depth = self._object_depth(mask, depth_image)
+        object_depth = self._object_depth(mask, depth_image, self._depth_percentile_for_instance(instance))
         mask_area = int(mask.sum())
         return GraspPriorityScore(
             total=0.0,
@@ -175,7 +180,24 @@ class GraspPriorityScorer:
             return None
         return mask > 0
 
-    def _object_depth(self, mask: np.ndarray, depth_image: np.ndarray | None) -> Optional[float]:
+    def _depth_percentile_for_instance(self, instance: Any) -> float:
+        class_index = self._class_index(instance)
+        if class_index is not None and class_index in self.depth_percentile_by_class:
+            return float(self.depth_percentile_by_class[class_index])
+        return float(self.depth_percentile)
+
+    @staticmethod
+    def _class_index(instance: Any) -> int | None:
+        for attr in ("class_index", "label"):
+            value = getattr(instance, attr, None)
+            try:
+                if value is not None:
+                    return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _object_depth(self, mask: np.ndarray, depth_image: np.ndarray | None, depth_percentile: float) -> Optional[float]:
         if depth_image is None or depth_image.ndim < 2:
             return None
 
@@ -190,7 +212,7 @@ class GraspPriorityScorer:
             values = valid_depth_values(depth_image, mask)
         if values.size == 0:
             return None
-        return float(np.percentile(values.astype(np.float64), self.depth_percentile))
+        return float(np.percentile(values.astype(np.float64), float(depth_percentile)))
 
     def _clearance_score(
         self,

@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import resource
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,16 +22,13 @@ from src.utils.crop import DEFAULT_SEGMENTATION_ROI_2013
 from src.utils.depth import median_valid_depth_at_point
 from src.utils.geometry import quaternion_to_rotation_matrix
 from src.utils.mask import largest_component_mask, mask_center_point
+from src.utils.suction_evaluation import normal_z_score
 from src.utils.suction_footprint import (
-    DEFAULT_CUP_CENTER_SPACING_MM,
-    DEFAULT_CUP_DIAMETER_MM,
     compute_dual_cup_footprint,
 )
 
 
 DEBUG_ROI_2013 = DEFAULT_SEGMENTATION_ROI_2013
-CUP_DIAMETER_MM = DEFAULT_CUP_DIAMETER_MM
-CUP_CENTER_SPACING_MM = DEFAULT_CUP_CENTER_SPACING_MM
 
 
 def _build_logger() -> logging.Logger:
@@ -40,6 +39,29 @@ def _build_logger() -> logging.Logger:
         logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     return logger
+
+
+def _rss_mb() -> float | None:
+    status_path = Path("/proc/self/status")
+    if not status_path.is_file():
+        return None
+    for line in status_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if line.startswith("VmRSS:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                return float(parts[1]) / 1024.0
+    return None
+
+
+def _peak_rss_mb() -> float:
+    value = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    return value / 1024.0
+
+
+def _memory_text() -> str:
+    rss = _rss_mb()
+    rss_text = f"{rss:.1f} MB" if rss is not None else "n/a"
+    return f"rss={rss_text}, peak={_peak_rss_mb():.1f} MB"
 
 
 def _selected_model(option_file: str) -> tuple[dict[str, Any], str]:
@@ -85,6 +107,12 @@ def _sample_dirs(input_dir: Path) -> list[Path]:
 
 
 def _grasp_pixel(prediction: Any, polygon: list[list[int]]) -> tuple[int, int]:
+    surface_debug = getattr(prediction, "suction_surface", None)
+    if isinstance(surface_debug, dict):
+        center_xy = surface_debug.get("surface_center_xy")
+        if isinstance(center_xy, list) and len(center_xy) == 2:
+            return int(center_xy[0]), int(center_xy[1])
+
     mask = getattr(prediction, "mask", None)
     if mask is not None and np.any(mask):
         binary = largest_component_mask((mask > 0).astype(np.uint8))
@@ -99,6 +127,9 @@ def _draw_xyz_axes(
     image: np.ndarray,
     anchor: tuple[int, int],
     quaternion_xyzw: Any,
+    intrinsic: np.ndarray | None = None,
+    extrinsic: np.ndarray | None = None,
+    origin_robot_xyz: Any = None,
     scale: int = 36,
 ) -> None:
     quaternion = np.asarray(quaternion_xyzw, dtype=np.float64).reshape(4)
@@ -108,14 +139,97 @@ def _draw_xyz_axes(
     colors = [(0, 0, 255), (0, 180, 0), (255, 0, 0)]
     labels = ["X", "Y", "Z"]
     for axis, color, label in zip(rotation.T, colors, labels):
-        direction = np.asarray([axis[0], axis[1]], dtype=np.float64)
+        projected = _project_robot_axis(anchor, axis, intrinsic, extrinsic, origin_robot_xyz, scale_mm=float(scale))
+        if projected is None:
+            direction = np.asarray([axis[0], axis[1]], dtype=np.float64)
+            norm = np.linalg.norm(direction)
+            if norm < 1e-9:
+                continue
+            end = origin + np.round(direction / norm * scale).astype(np.int32)
+            origin_xy = tuple(origin)
+            end_xy = (int(end[0]), int(end[1]))
+        else:
+            origin_xy, end_xy = projected
+        cv2.arrowedLine(image, origin_xy, end_xy, color, 2, cv2.LINE_AA, tipLength=0.25)
+        cv2.putText(image, label, end_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2, cv2.LINE_AA)
+
+
+def _draw_z_axis(
+    image: np.ndarray,
+    anchor: tuple[int, int],
+    quaternion_xyzw: Any,
+    intrinsic: np.ndarray | None = None,
+    extrinsic: np.ndarray | None = None,
+    origin_robot_xyz: Any = None,
+    scale: int = 30,
+) -> None:
+    quaternion = np.asarray(quaternion_xyzw, dtype=np.float64).reshape(4)
+    rotation = quaternion_to_rotation_matrix(quaternion)
+    z_axis = rotation.T[2]
+    projected = _project_robot_axis(anchor, z_axis, intrinsic, extrinsic, origin_robot_xyz, scale_mm=float(scale))
+    if projected is None:
+        origin = np.asarray(anchor, dtype=np.int32)
+        direction = np.asarray([z_axis[0], z_axis[1]], dtype=np.float64)
         norm = np.linalg.norm(direction)
         if norm < 1e-9:
-            continue
+            return
         end = origin + np.round(direction / norm * scale).astype(np.int32)
+        origin_xy = tuple(origin)
         end_xy = (int(end[0]), int(end[1]))
-        cv2.arrowedLine(image, tuple(origin), end_xy, color, 2, cv2.LINE_AA, tipLength=0.25)
-        cv2.putText(image, label, end_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2, cv2.LINE_AA)
+    else:
+        origin_xy, end_xy = projected
+    cv2.arrowedLine(image, origin_xy, end_xy, (255, 0, 0), 2, cv2.LINE_AA, tipLength=0.25)
+    cv2.putText(image, "Z", end_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 0, 0), 2, cv2.LINE_AA)
+
+
+def _project_robot_axis(
+    anchor: tuple[int, int],
+    axis_robot: np.ndarray,
+    intrinsic: np.ndarray | None,
+    extrinsic: np.ndarray | None,
+    origin_robot_xyz: Any,
+    scale_mm: float,
+) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    if intrinsic is None or extrinsic is None or origin_robot_xyz is None:
+        return None
+    try:
+        origin_robot = np.asarray(origin_robot_xyz, dtype=np.float64).reshape(3)
+        axis = np.asarray(axis_robot, dtype=np.float64).reshape(3)
+    except (TypeError, ValueError):
+        return None
+    axis_norm = np.linalg.norm(axis)
+    if axis_norm < 1e-9:
+        return None
+
+    camera_from_robot = np.linalg.inv(np.asarray(extrinsic, dtype=np.float64))
+    origin_camera = _transform_robot_point_to_camera(origin_robot, camera_from_robot)
+    end_camera = _transform_robot_point_to_camera(origin_robot + (axis / axis_norm) * scale_mm, camera_from_robot)
+    origin_xy = _project_camera_point(origin_camera, intrinsic)
+    end_xy = _project_camera_point(end_camera, intrinsic)
+    if origin_xy is None or end_xy is None:
+        return None
+    if np.sum((np.asarray(origin_xy) - np.asarray(anchor)) ** 2) > 30.0 ** 2:
+        offset = np.asarray(anchor, dtype=np.int32) - np.asarray(origin_xy, dtype=np.int32)
+        end_xy = tuple((np.asarray(end_xy, dtype=np.int32) + offset).tolist())
+        origin_xy = (int(anchor[0]), int(anchor[1]))
+    return origin_xy, end_xy
+
+
+def _transform_robot_point_to_camera(point_robot: np.ndarray, camera_from_robot: np.ndarray) -> np.ndarray:
+    point_h = np.ones(4, dtype=np.float64)
+    point_h[:3] = point_robot
+    return (camera_from_robot @ point_h)[:3]
+
+
+def _project_camera_point(point_camera: np.ndarray, intrinsic: np.ndarray) -> tuple[int, int] | None:
+    z = float(point_camera[2])
+    if abs(z) < 1e-9:
+        return None
+    u = (float(point_camera[0]) * float(intrinsic[0, 0]) / z) + float(intrinsic[0, 2])
+    v = (float(point_camera[1]) * float(intrinsic[1, 1]) / z) + float(intrinsic[1, 2])
+    if not np.isfinite(u) or not np.isfinite(v):
+        return None
+    return int(round(u)), int(round(v))
 
 
 def _class_color(class_id: Any) -> tuple[int, int, int]:
@@ -202,8 +316,10 @@ def _priority_debug(prediction: Any) -> dict[str, Any]:
         "center_distance": _finite_float(getattr(prediction, "grasp_center_distance", None)),
         "depth_candidate": bool(getattr(prediction, "grasp_depth_candidate", False)),
         "valid_depth": bool(getattr(prediction, "grasp_valid_depth", False)),
+        "suction_normal_z_score": _finite_float(getattr(prediction, "suction_normal_z_score", None)),
         "suction_footprint": footprint if isinstance(footprint, dict) else None,
         "suction_candidates": list(getattr(prediction, "suction_candidates", []) or []),
+        "suction_surface": getattr(prediction, "suction_surface", None),
     }
 
 
@@ -231,7 +347,7 @@ def _local_depth_mm(
     depth_image: np.ndarray | None,
     grasp_xy: tuple[int, int],
     mask: np.ndarray | None,
-    window: int = 7,
+    window: int,
 ) -> float | None:
     u, v = grasp_xy
     return median_valid_depth_at_point(depth_image, u, v, mask, window=window)
@@ -244,19 +360,51 @@ def _draw_dual_cup_footprint(
     depth_image: np.ndarray | None,
     intrinsic: np.ndarray | None,
     color: tuple[int, int, int],
+    suction_pipeline: Any | None,
 ) -> dict[str, Any]:
+    stored_footprint = getattr(prediction, "suction_footprint", None) if prediction is not None else None
+    if isinstance(stored_footprint, dict):
+        radius_px = _finite_float(stored_footprint.get("cup_radius_px"))
+        cup_centers_xy = stored_footprint.get("cup_centers_xy")
+        if radius_px is not None and isinstance(cup_centers_xy, list) and len(cup_centers_xy) == 2:
+            radius_int = max(1, int(round(radius_px)))
+            center_points = [
+                (int(round(float(point[0]))), int(round(float(point[1]))))
+                for point in cup_centers_xy
+                if isinstance(point, list) and len(point) == 2
+            ]
+            if len(center_points) == 2:
+                cv2.line(image, center_points[0], center_points[1], (0, 255, 0), 2, cv2.LINE_AA)
+                for point in center_points:
+                    cv2.circle(image, point, radius_int, (255, 255, 255), 4, cv2.LINE_AA)
+                    cv2.circle(image, point, radius_int, color, 2, cv2.LINE_AA)
+                    cv2.circle(image, point, 3, color, -1, cv2.LINE_AA)
+
+                data = dict(stored_footprint)
+                data.update({
+                    "drawn": True,
+                    "source": "pipeline_suction_footprint",
+                    "cup_centers_xy": [[int(x), int(y)] for x, y in center_points],
+                })
+                return data
+
     mask = getattr(prediction, "mask", None) if prediction is not None else None
-    depth_mm = _local_depth_mm(depth_image, grasp_xy, mask)
+    depth_window = int(getattr(suction_pipeline, "depth_window", 7))
+    depth_mm = _local_depth_mm(depth_image, grasp_xy, mask, window=depth_window)
     if depth_mm is None or depth_mm <= 0 or intrinsic is None:
         return {"drawn": False, "reason": "missing_depth_or_intrinsic"}
 
+    cup_diameter_mm = float(getattr(suction_pipeline, "cup_diameter_mm", 25.0))
+    cup_center_spacing_mm = float(getattr(suction_pipeline, "cup_center_spacing_mm", 35.0))
+    min_cup_inside_ratio = float(getattr(suction_pipeline, "min_cup_inside_ratio", 0.85))
     footprint = compute_dual_cup_footprint(
         mask if mask is not None else np.zeros(image.shape[:2], dtype=np.uint8),
         grasp_xy,
         depth_mm,
         intrinsic,
-        cup_diameter_mm=CUP_DIAMETER_MM,
-        cup_center_spacing_mm=CUP_CENTER_SPACING_MM,
+        cup_diameter_mm=cup_diameter_mm,
+        cup_center_spacing_mm=cup_center_spacing_mm,
+        min_cup_inside_ratio=min_cup_inside_ratio,
     )
     if footprint is None:
         return {"drawn": False, "reason": "invalid_projection"}
@@ -267,7 +415,7 @@ def _draw_dual_cup_footprint(
         for point in footprint.cup_centers_xy
     ]
 
-    cv2.line(image, center_points[0], center_points[1], color, 2, cv2.LINE_AA)
+    cv2.line(image, center_points[0], center_points[1], (0, 255, 0), 2, cv2.LINE_AA)
     for point in center_points:
         cv2.circle(image, point, radius_int, (255, 255, 255), 4, cv2.LINE_AA)
         cv2.circle(image, point, radius_int, color, 2, cv2.LINE_AA)
@@ -285,8 +433,11 @@ def _render_debug(
     image: np.ndarray,
     depth_image: np.ndarray | None,
     intrinsic: np.ndarray | None,
+    extrinsic: np.ndarray | None,
     result: dict[str, Any],
     predictions: list[Any],
+    suction_pipeline: Any | None,
+    suction_debug_top_k: int,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     overlay = image.copy()
     polygons = result.get("result_data", [])
@@ -301,22 +452,25 @@ def _render_debug(
 
         class_id = class_ids[index] if index < len(class_ids) else None
         is_grasp_target = index == 0
+        is_suction_debug_target = index < suction_debug_top_k
         color = (0, 0, 255) if is_grasp_target else _class_color(class_id)
-        thickness = 5 if is_grasp_target else 3
+        thickness = 4 if is_grasp_target else 2
         cv2.polylines(overlay, [points], True, color, thickness, cv2.LINE_AA)
 
         prediction = predictions[index] if index < len(predictions) else None
         grasp_xy = _grasp_pixel(prediction, polygon) if prediction is not None else _grasp_pixel(None, polygon)
+        point_list = suction_points[index] if index < len(suction_points) else []
+        has_suction_point = bool(point_list)
         footprint_debug = {}
-        if is_grasp_target:
-            cv2.circle(overlay, grasp_xy, 15, (255, 255, 255), 3, cv2.LINE_AA)
+        if is_suction_debug_target and has_suction_point:
+            cv2.circle(overlay, grasp_xy, 8 if is_grasp_target else 6, (255, 255, 255), 2, cv2.LINE_AA)
             cv2.drawMarker(
                 overlay,
                 grasp_xy,
                 color,
                 markerType=cv2.MARKER_CROSS,
-                markerSize=34,
-                thickness=4,
+                markerSize=20 if is_grasp_target else 16,
+                thickness=2,
                 line_type=cv2.LINE_AA,
             )
             footprint_debug = _draw_dual_cup_footprint(
@@ -326,19 +480,21 @@ def _render_debug(
                 depth_image,
                 intrinsic,
                 color,
+                suction_pipeline,
             )
-            _draw_grasp_target_label(overlay, points, prediction, color)
+            if is_grasp_target:
+                _draw_grasp_target_label(overlay, points, prediction, color)
         else:
             cv2.circle(overlay, grasp_xy, 8, (0, 0, 0), -1, cv2.LINE_AA)
             cv2.circle(overlay, grasp_xy, 5, color, -1, cv2.LINE_AA)
 
         grasp_xyz = None
-        point_list = suction_points[index] if index < len(suction_points) else []
-        if point_list:
+        if has_suction_point:
             point = point_list[0]
             if isinstance(point, (list, tuple)) and len(point) >= 2:
                 grasp_xyz = point[0]
-                _draw_xyz_axes(overlay, grasp_xy, point[1])
+                if is_suction_debug_target:
+                    _draw_z_axis(overlay, grasp_xy, point[1], intrinsic=intrinsic, extrinsic=extrinsic, origin_robot_xyz=grasp_xyz)
 
         if not is_grasp_target:
             _draw_class_label(overlay, class_id, tuple(points[0].tolist()), color)
@@ -347,6 +503,7 @@ def _render_debug(
             {
                 "rank": index + 1,
                 "is_grasp_target": is_grasp_target,
+                "is_suction_debug_target": is_suction_debug_target,
                 "class_id": class_id,
                 "polygon": [[int(x), int(y)] for x, y in points.tolist()],
                 "grasp_xy": [int(grasp_xy[0]), int(grasp_xy[1])],
@@ -366,11 +523,23 @@ def _save_debug_result(
     image: np.ndarray,
     depth_image: np.ndarray | None,
     intrinsic: np.ndarray | None,
+    extrinsic: np.ndarray | None,
     result: dict[str, Any],
     predictions: list[Any],
+    suction_pipeline: Any | None,
+    suction_debug_top_k: int,
 ) -> None:
     relative_name = "_".join(sample_dir.parts[-2:]) if len(sample_dir.parts) >= 2 else sample_dir.name
-    overlay, summaries = _render_debug(image, depth_image, intrinsic, result, predictions)
+    overlay, summaries = _render_debug(
+        image,
+        depth_image,
+        intrinsic,
+        extrinsic,
+        result,
+        predictions,
+        suction_pipeline,
+        suction_debug_top_k,
+    )
 
     output_root.mkdir(parents=True, exist_ok=True)
     image_path = output_root / f"{relative_name}_debug.png"
@@ -388,6 +557,43 @@ def _save_debug_result(
             ensure_ascii=False,
             indent=2,
         )
+
+
+def _compute_debug_suction_top_k(
+    model: PickNPlace,
+    result: dict[str, Any],
+    predictions: list[Any],
+    depth_image: np.ndarray | None,
+    normal_image: np.ndarray | None,
+    top_k: int,
+) -> None:
+    if top_k <= 0 or not predictions:
+        result["suction_points"] = [[] for _ in predictions]
+        result["pts_per_object"] = [0 for _ in predictions]
+        return
+
+    for prediction in predictions:
+        prediction.suction_footprint = None
+        prediction.suction_candidates = []
+        prediction.suction_surface = None
+        prediction.suction_normal_z_score = None
+
+    target_count = min(int(top_k), len(predictions))
+    suction_points = [[] for _ in predictions]
+    computed_points = model.suction_pipeline.compute(
+        predictions[:target_count],
+        depth_image,
+        normal_image,
+        model.c_matrix,
+        model.extrinsic,
+    )
+    for index, point_list in enumerate(computed_points):
+        suction_points[index] = point_list
+        surface_debug = getattr(predictions[index], "suction_surface", None)
+        predictions[index].suction_normal_z_score = normal_z_score(surface_debug) if isinstance(surface_debug, dict) else None
+
+    result["suction_points"] = suction_points
+    result["pts_per_object"] = [len(points) for points in suction_points]
 
 
 def run_debug(args: argparse.Namespace) -> None:
@@ -413,25 +619,62 @@ def run_debug(args: argparse.Namespace) -> None:
 
     logger.info(f"debug samples: {len(sample_dirs)}")
     for sample_dir in sample_dirs:
+        sample_start = time.perf_counter()
         rgb_path = sample_dir / "rgb.png"
         depth_path = sample_dir / "depth.png"
         normal_path = sample_dir / "normal.bin"
 
+        load_start = time.perf_counter()
         image = cv2.imread(str(rgb_path), cv2.IMREAD_COLOR)
         if image is None:
             raise FileNotFoundError(f"Failed to read image: {rgb_path}")
         depth = cv2.imread(str(depth_path), cv2.IMREAD_UNCHANGED) if depth_path.is_file() else None
         normal = _load_normal(normal_path, image.shape[:2])
+        load_elapsed = time.perf_counter() - load_start
 
+        run_start = time.perf_counter()
         result, predictions = model.run(
             image,
             depth_image=depth,
             normal_image=normal,
-            compute_suction_pts=True,
+            compute_suction_pts=False,
             roi_2d=DEBUG_ROI_2013,
         )
-        _save_debug_result(sample_dir, Path(args.output), image, depth, model.c_matrix, result, predictions)
-        logger.info(f"saved: {sample_dir}")
+        _compute_debug_suction_top_k(
+            model,
+            result,
+            predictions,
+            depth,
+            normal,
+            top_k=args.suction_top_k,
+        )
+        run_elapsed = time.perf_counter() - run_start
+
+        save_start = time.perf_counter()
+        _save_debug_result(
+            sample_dir,
+            Path(args.output),
+            image,
+            depth,
+            model.c_matrix,
+            model.extrinsic,
+            result,
+            predictions,
+            model.suction_pipeline,
+            args.suction_top_k,
+        )
+        save_elapsed = time.perf_counter() - save_start
+        total_elapsed = time.perf_counter() - sample_start
+
+        logger.info(
+            "saved: %s | time load=%.3fs run=%.3fs save=%.3fs total=%.3fs | %s",
+            sample_dir,
+            load_elapsed,
+            run_elapsed,
+            save_elapsed,
+            total_elapsed,
+            _memory_text(),
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -442,6 +685,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--info", default="img/info.json", help="camera info json for intrinsic values")
     parser.add_argument("--cuda", default=None, help="GPU id, or -1/cpu for CPU")
     parser.add_argument("--limit", type=int, default=None, help="process only the first N samples")
+    parser.add_argument("--suction-top-k", type=int, default=5, help="compute and draw suction for the top N priority objects")
     return parser.parse_args()
 
 

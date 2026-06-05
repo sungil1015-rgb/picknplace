@@ -31,3 +31,7 @@ weights
 img
 sampleimg
 inference.md
+debug_normal
+src/utils/debug_normal.py
+src/utils/debug_plane.py
+debug_plane

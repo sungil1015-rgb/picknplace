@@ -27,6 +27,8 @@ from src.pipeline.grasp_priority import GraspPriorityScorer
 from src.pipeline.suction_pipeline import SuctionPipeline
 from src.utils.geometry import extrinsic_from_translation_and_euler, make_intrinsic, quaternion_to_rotation_matrix
 from src.utils.mask import largest_component_mask, mask_to_polygon
+from src.utils.suction_config import SuctionConfig, as_bool
+from src.utils.suction_evaluation import normal_z_score
 
 
 def _load_yaml(path: str | Path) -> dict[str, Any]:
@@ -55,6 +57,18 @@ def _required(mapping: dict[str, Any], key: str, section_name: str) -> Any:
     return mapping[key]
 
 
+def _class_float_mapping(mapping: Any) -> dict[int, float]:
+    if not isinstance(mapping, dict):
+        return {}
+    parsed: dict[int, float] = {}
+    for key, value in mapping.items():
+        try:
+            parsed[int(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return parsed
+
+
 class PickNPlace:
     def __init__(
             self,
@@ -75,9 +89,13 @@ class PickNPlace:
         pipeline_cfg = _section(self.config, "pipeline")
         polygon_cfg = _section(self.config, "polygon")
         self.fixed_focal_length = float(_required(pipeline_cfg, "fixed_focal_length", "pipeline"))
+        self.use_fixed_focal_length = as_bool(pipeline_cfg.get("use_fixed_focal_length", True))
         self.segmentation_roi = [float(value) for value in _required(pipeline_cfg, "segmentation_roi", "pipeline")]
         if len(self.segmentation_roi) != 4:
             raise ValueError("PickNPlace config 'pipeline.segmentation_roi' must contain 4 values")
+        self.roi_source = str(pipeline_cfg.get("roi_source", "config")).lower()
+        if self.roi_source not in ("config", "input"):
+            raise ValueError("PickNPlace config 'pipeline.roi_source' must be 'config' or 'input'")
         self.polygon_approx_ratio = float(_required(polygon_cfg, "approx_ratio", "polygon"))
         self.polygon_min_epsilon = float(_required(polygon_cfg, "min_epsilon", "polygon"))
 
@@ -157,6 +175,7 @@ class PickNPlace:
                 mode=str(_required(priority_cfg, "mode", "priority")),
                 depth_candidate_score_margin=float(_required(priority_cfg, "depth_candidate_score_margin", "priority")),
                 depth_percentile=float(_required(priority_cfg, "depth_percentile", "priority")),
+                depth_percentile_by_class=_class_float_mapping(priority_cfg.get("depth_percentile_by_class", {})),
                 erosion_kernel=int(_required(priority_cfg, "erosion_kernel", "priority")),
                 clearance_max_distance=float(_required(priority_cfg, "clearance_max_distance", "priority")),
             )
@@ -178,16 +197,7 @@ class PickNPlace:
             self.logger.exception(f"[{self.name}] SuctionPipeline config 로드 실패: {exc}")
             raise
 
-        return SuctionPipeline(
-            depth_window=int(_required(suction_cfg, "depth_window", "suction")),
-            normal_window=int(_required(suction_cfg, "normal_window", "suction")),
-            cup_diameter_mm=float(_required(suction_cfg, "cup_diameter_mm", "suction")),
-            cup_center_spacing_mm=float(_required(suction_cfg, "cup_center_spacing_mm", "suction")),
-            min_cup_inside_ratio=float(_required(suction_cfg, "min_cup_inside_ratio", "suction")),
-            candidate_count=int(_required(suction_cfg, "candidate_count", "suction")),
-            candidate_min_distance_px=float(_required(suction_cfg, "candidate_min_distance_px", "suction")),
-            pca_offset_px=float(_required(suction_cfg, "pca_offset_px", "suction")),
-        )
+        return SuctionPipeline(SuctionConfig.from_mapping(suction_cfg))
 
     def _load_extrinsic(self) -> np.ndarray:
         calibration_config = str(_required(self.calibration_cfg, "config", "calibration"))
@@ -226,14 +236,23 @@ class PickNPlace:
     # ─── 카메라 intrinsic ───────────────────────────────────────────────
 
     def set_intrinsic(self, cx: float, cy: float, fx: float, fy: float) -> None:
-        """카메라 intrinsic을 반영하되 focal length는 pipeline config 값으로 고정."""
-        self.c_matrix = make_intrinsic(cx, cy, self.fixed_focal_length, self.fixed_focal_length)
+        """카메라 intrinsic을 적용한다. config에서 고정 focal length 정책을 선택할 수 있다."""
+        if self.use_fixed_focal_length:
+            fx = self.fixed_focal_length
+            fy = self.fixed_focal_length
+        self.c_matrix = make_intrinsic(cx, cy, fx, fy)
 
     def _resolve_segmentation_roi(
             self,
             rgb_image: np.ndarray,
             roi_2d: Optional[List[float]],
     ) -> List[float]:
+        if self.roi_source == "input" and roi_2d is not None:
+            input_roi = [float(value) for value in roi_2d]
+            if len(input_roi) != 4:
+                raise ValueError("roi_2d must contain 4 values")
+            self.logger.info(f"[{self.name}] using input 2D ROI: {input_roi}")
+            return input_roi
         fixed_roi = list(self.segmentation_roi)
         self.logger.info(f"[{self.name}] using fixed 2D ROI: {fixed_roi}")
         return fixed_roi
@@ -349,15 +368,6 @@ class PickNPlace:
         else:
             class_ids = [int(prediction.label) if prediction.label is not None else 0 for prediction in kept_predictions]
 
-        if compute_suction_pts:
-            suction_points = self.suction_pipeline.compute(
-                kept_predictions,
-                depth_image,
-                normal_image,
-                self.c_matrix,
-                self.extrinsic,
-            )
-
         priority_scores = self.priority_scorer.score_instances(
             kept_predictions,
             depth_image,
@@ -377,6 +387,25 @@ class PickNPlace:
             instance.grasp_center_distance = priority_score.center_distance
             instance.grasp_depth_candidate = priority_score.depth_candidate
             instance.grasp_valid_depth = priority_score.valid_depth
+
+        if compute_suction_pts:
+            for instance in kept_predictions:
+                instance.suction_footprint = None
+                instance.suction_candidates = []
+                instance.suction_surface = None
+                instance.suction_normal_z_score = None
+
+            target_index = self._select_priority_target_index(kept_predictions, priority_scores)
+            if target_index is not None:
+                target_suction_points = self.suction_pipeline.compute(
+                    [kept_predictions[target_index]],
+                    depth_image,
+                    normal_image,
+                    self.c_matrix,
+                    self.extrinsic,
+                )
+                kept_predictions[target_index].suction_normal_z_score = self._suction_normal_z_score(kept_predictions[target_index])
+                suction_points[target_index] = target_suction_points[0] if target_suction_points else []
 
         items = list(zip(polygons, class_ids, suction_points, kept_predictions, priority_scores))
         items.sort(
@@ -402,6 +431,32 @@ class PickNPlace:
             "2d_roi": resolved_roi_2d,
         }
         return result, kept_predictions
+
+    @staticmethod
+    def _select_priority_target_index(
+            predictions: List[Any],
+            priority_scores: List[Any],
+    ) -> Optional[int]:
+        if not predictions or not priority_scores:
+            return None
+        count = min(len(predictions), len(priority_scores))
+        if count <= 0:
+            return None
+        return max(
+            range(count),
+            key=lambda index: (
+                float(priority_scores[index].total),
+                float(getattr(predictions[index], "class_similarity", 0.0)),
+                float(getattr(predictions[index], "score", 0.0) or 0.0),
+            ),
+        )
+
+    @staticmethod
+    def _suction_normal_z_score(prediction: Any) -> float:
+        surface_debug = getattr(prediction, "suction_surface", None)
+        if not isinstance(surface_debug, dict) or not surface_debug.get("passed", False):
+            return 0.0
+        return normal_z_score(surface_debug)
 
     # ─── 결과 시각화 저장 ───────────────────────────────────────────────
 
