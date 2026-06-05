@@ -166,7 +166,8 @@ def split_surface_by_depth_gap(
     )
     if max_gap < float(min_depth_gap_mm):
         return DepthLayerSplit(None, {**debug, "applied": False, "reason": "depth_gap_too_small"})
-    if initial_near_area < min_area or initial_far_area < min_area:
+    line_cut_applied = bool(line_debug.get("line_cut_applied", False))
+    if not line_cut_applied and (initial_near_area < min_area or initial_far_area < min_area):
         return DepthLayerSplit(None, {**debug, "applied": False, "reason": "depth_layer_too_small"})
 
     selected_mask, selected_layer, component_debug = _largest_depth_layer_component(
