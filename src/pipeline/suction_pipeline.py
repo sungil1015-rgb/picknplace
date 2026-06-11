@@ -30,6 +30,8 @@ from src.utils.suction_footprint import (
     principal_axis_2d,
 )
 from src.utils.suction_config import SuctionConfig
+from src.utils.suction_collision import union_of_other_masks
+from src.utils.single_cup import SingleCupParams, select_single_cup_suction
 
 
 class SuctionPipeline:
@@ -79,6 +81,10 @@ class SuctionPipeline:
         self.axis_min_rect_ratio = float(config.axis_min_rect_ratio)
         self.axis_min_pca_ratio = float(config.axis_min_pca_ratio)
         self.axis_reference_step_px = float(config.axis_reference_step_px)
+        self.single_cup_enabled = bool(config.single_cup_enabled)
+        self.cup_count_default = int(config.cup_count_default)
+        self.cup_count_by_class = dict(config.cup_count_by_class)
+        self._single_cup_config = config
 
     def compute(
         self,
@@ -92,7 +98,7 @@ class SuctionPipeline:
             return [[] for _ in instances]
 
         suction_points: list[list[list[list[float]]]] = []
-        for instance in instances:
+        for target_index, instance in enumerate(instances):
             mask = getattr(instance, "mask", None)
             if mask is None:
                 setattr(instance, "suction_footprint", None)
@@ -101,6 +107,7 @@ class SuctionPipeline:
                 suction_points.append([])
                 continue
 
+            others_mask = union_of_other_masks(instances, target_index, depth_image.shape)
             point, footprint, candidates, surface_debug = self._compute_one(
                 instance,
                 mask,
@@ -108,6 +115,7 @@ class SuctionPipeline:
                 normal_image,
                 intrinsic,
                 extrinsic,
+                others_mask,
             )
             setattr(instance, "suction_footprint", footprint.to_dict() if footprint is not None else None)
             setattr(instance, "suction_candidates", candidates)
@@ -123,6 +131,7 @@ class SuctionPipeline:
         normal_image: np.ndarray | None,
         intrinsic: np.ndarray,
         extrinsic: np.ndarray,
+        others_mask: np.ndarray | None = None,
     ) -> tuple[list[list[float]] | None, SuctionFootprint | None, list[dict[str, Any]], dict[str, Any] | None]:
         binary_mask = (mask > 0).astype(np.uint8)
         binary_mask = largest_component_mask(binary_mask)
@@ -132,6 +141,34 @@ class SuctionPipeline:
         candidates = self._generate_suction_candidates(binary_mask)
         if not candidates:
             return None, None, [], None
+
+        if self.single_cup_enabled and self._cup_count_for_instance(instance) == 1:
+            _others = others_mask if others_mask is not None else np.zeros(depth_image.shape[:2], dtype=bool)
+            selected, sc_debug = select_single_cup_suction(
+                mask=binary_mask,
+                depth_image=depth_image,
+                normal_image=normal_image,
+                intrinsic=intrinsic,
+                others_mask=_others,
+                candidates=candidates,
+                params=self._single_cup_params(),
+            )
+            if selected is None:
+                return None, None, candidates, sc_debug
+            u, v, depth_mm, footprint, surface_debug = selected
+            point_camera = pixel_to_camera(u, v, depth_mm, intrinsic)
+            point_robot = transform_point(point_camera, extrinsic)
+            normal_camera = self._selected_surface_normal(surface_debug, normal_image, u, v, binary_mask)
+            normal_robot = orient_normal_z_up(transform_normal(normal_camera, extrinsic))
+            reference_camera = self._selected_surface_reference_camera(
+                surface_debug, binary_mask, u, v, depth_mm, intrinsic, point_camera, normal_camera,
+            )
+            reference_robot = project_to_tangent(transform_direction(reference_camera, extrinsic), normal_robot)
+            quaternion = approach_and_reference_to_quaternion(normal_robot, reference_robot)
+            return [
+                [round(float(value), 3) for value in point_robot],
+                [round(float(value), 6) for value in quaternion],
+            ], footprint, candidates, surface_debug
 
         strategy = self._suction_strategy_for_instance(instance)
         class4_failure_debug = None
@@ -235,6 +272,32 @@ class SuctionPipeline:
     @staticmethod
     def _is_class4_instance(instance: Any) -> bool:
         return SuctionPipeline._class_index(instance) == 4
+
+    def _cup_count_for_instance(self, instance: Any) -> int:
+        class_index = self._class_index(instance)
+        if class_index is not None and class_index in self.cup_count_by_class:
+            return int(self.cup_count_by_class[class_index])
+        return int(self.cup_count_default)
+
+    def _single_cup_params(self) -> SingleCupParams:
+        cfg = self._single_cup_config
+        return SingleCupParams(
+            cup_diameter_mm=self.cup_diameter_mm,
+            min_cup_inside_ratio=cfg.single_cup_min_cup_inside_ratio,
+            depth_window=self.depth_window,
+            flat_max_bump_mm=cfg.sc_flat_max_bump_mm,
+            flat_max_dent_mm=cfg.sc_flat_max_dent_mm,
+            flat_max_abs_p95_mm=cfg.sc_flat_max_abs_p95_mm,
+            flat_bad_residual_mm=cfg.sc_flat_bad_residual_mm,
+            flat_max_bad_ratio=cfg.sc_flat_max_bad_ratio,
+            flat_min_valid_ratio=cfg.sc_flat_min_valid_ratio,
+            seal_band_mm=cfg.sc_seal_band_mm,
+            max_neighbor_ratio=cfg.sc_max_neighbor_ratio,
+            cup_center_spacing_mm=self.cup_center_spacing_mm,
+            protrusion_tol_mm=cfg.sc_protrusion_tol_mm,
+            collision_min_valid_ratio=cfg.sc_collision_min_valid_ratio,
+            num_rotations=cfg.sc_num_rotations,
+        )
 
     def _select_mask_suction(
         self,

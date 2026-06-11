@@ -80,6 +80,21 @@ class SuctionConfig:
     axis_min_rect_ratio: float
     axis_min_pca_ratio: float
     axis_reference_step_px: float
+    single_cup_enabled: bool
+    cup_count_default: int
+    cup_count_by_class: dict[int, int]
+    single_cup_min_cup_inside_ratio: float
+    sc_flat_max_bump_mm: float
+    sc_flat_max_dent_mm: float
+    sc_flat_max_abs_p95_mm: float
+    sc_flat_bad_residual_mm: float
+    sc_flat_max_bad_ratio: float
+    sc_flat_min_valid_ratio: float
+    sc_seal_band_mm: float
+    sc_max_neighbor_ratio: float
+    sc_protrusion_tol_mm: float
+    sc_num_rotations: int
+    sc_collision_min_valid_ratio: float
 
     @classmethod
     def from_mapping(cls, mapping: dict[str, Any]) -> "SuctionConfig":
@@ -95,6 +110,11 @@ class SuctionConfig:
         advanced_cfg = _section(mapping, "advanced")
         footprint_cfg = _section(advanced_cfg, "footprint")
         axis_cfg = _section(advanced_cfg, "axis")
+        single_cup_cfg = _section(mapping, "single_cup")
+        sc_flat_cfg = _section(single_cup_cfg, "flatness")
+        sc_excl_cfg = _section(single_cup_cfg, "exclusivity")
+        sc_coll_cfg = _section(single_cup_cfg, "collision")
+        sc_cup_count_by_class = _cup_count_by_class(single_cup_cfg.get("cup_count_by_class", {}))
         return cls(
             depth_window=int(_get(mapping, advanced_cfg, "depth_window", "depth_window")),
             normal_window=int(_get(mapping, advanced_cfg, "normal_window", "normal_window")),
@@ -137,6 +157,21 @@ class SuctionConfig:
             axis_min_rect_ratio=float(_get(mapping, axis_cfg, "min_rect_ratio", "axis_min_rect_ratio")),
             axis_min_pca_ratio=float(_get(mapping, axis_cfg, "min_pca_ratio", "axis_min_pca_ratio")),
             axis_reference_step_px=float(_get(mapping, axis_cfg, "reference_step_px", "axis_reference_step_px")),
+            single_cup_enabled=as_bool(single_cup_cfg.get("enabled", False)),
+            cup_count_default=int(single_cup_cfg.get("cup_count_default", 2)),
+            cup_count_by_class=sc_cup_count_by_class,
+            single_cup_min_cup_inside_ratio=float(single_cup_cfg.get("min_cup_inside_ratio", 0.9)),
+            sc_flat_max_bump_mm=float(sc_flat_cfg.get("max_bump_mm", 4.0)),
+            sc_flat_max_dent_mm=float(sc_flat_cfg.get("max_dent_mm", 4.0)),
+            sc_flat_max_abs_p95_mm=float(sc_flat_cfg.get("max_abs_p95_mm", 3.0)),
+            sc_flat_bad_residual_mm=float(sc_flat_cfg.get("bad_residual_mm", 3.0)),
+            sc_flat_max_bad_ratio=float(sc_flat_cfg.get("max_bad_ratio", 0.15)),
+            sc_flat_min_valid_ratio=float(sc_flat_cfg.get("min_valid_ratio", 0.6)),
+            sc_seal_band_mm=float(sc_excl_cfg.get("seal_band_mm", 6.0)),
+            sc_max_neighbor_ratio=float(sc_excl_cfg.get("max_neighbor_ratio", 0.05)),
+            sc_protrusion_tol_mm=float(sc_coll_cfg.get("protrusion_tol_mm", 5.0)),
+            sc_num_rotations=int(sc_coll_cfg.get("num_rotations", 8)),
+            sc_collision_min_valid_ratio=float(sc_coll_cfg.get("min_valid_ratio", 0.4)),
         )
 
 
@@ -153,4 +188,16 @@ def _strategy_by_class(strategy_cfg: Any) -> dict[int, str]:
         except (TypeError, ValueError):
             continue
         parsed[class_index] = str(value)
+    return parsed
+
+
+def _cup_count_by_class(raw: Any) -> dict[int, int]:
+    if not isinstance(raw, dict):
+        return {}
+    parsed: dict[int, int] = {}
+    for key, value in raw.items():
+        try:
+            parsed[int(key)] = int(value)
+        except (TypeError, ValueError):
+            continue
     return parsed

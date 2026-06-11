@@ -77,3 +77,30 @@ suction:
       min_rect_ratio: 1.2
       min_pca_ratio: 2.5
       reference_step_px: 20.0
+
+  # 단일컵 흡착 + 안정(겹침/충돌) 로직. cup_count_by_class 에서 1 인 클래스가 단일컵 경로를 탄다.
+  single_cup:
+    enabled: true
+    cup_count_default: 2
+    cup_count_by_class:
+      0: 1            # haribo(구겨진 비닐백)
+    min_cup_inside_ratio: 0.9
+    flatness:         # 활성 컵 평탄/유효채움 (suction_plane_residual_check 재활용)
+      # 2026-06-11 재보정: 잔차를 LSQ 피팅 평면 기준으로 측정 (single_cup.fit_disk_plane).
+      # 하리보-only 37샷 165폴리곤 전수 커버 실측 요구치
+      # (bump 11.1 / dent 21.2 / p95 10.0 / bad 0.76) + ~10% 여유.
+      # dent 요구치 21mm는 호일 depth 스파이크 1건이 끌어올린 값 (해당 면 p95=3.2mm)
+      # — 실제 굴곡 변별은 p95/bad_ratio 가 담당.
+      max_bump_mm: 12.0
+      max_dent_mm: 24.0
+      max_abs_p95_mm: 11.0
+      bad_residual_mm: 3.0
+      max_bad_ratio: 0.8
+      min_valid_ratio: 0.6
+    exclusivity:      # 활성 컵이 옆 물체를 같이 빨지 않게
+      seal_band_mm: 6.0
+      max_neighbor_ratio: 0.05
+    collision:        # 비활성 컵 "착좌면 위 솟음" 충돌 + 8방향 회전 회피
+      protrusion_tol_mm: 5.0
+      num_rotations: 8
+      min_valid_ratio: 0.4

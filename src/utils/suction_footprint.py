@@ -297,3 +297,86 @@ def _mask_inside_ratio(mask: np.ndarray, region: np.ndarray) -> float:
     if total <= 0:
         return 0.0
     return float(np.count_nonzero(region & (mask > 0)) / total)
+
+
+def single_cup_disk_mask(
+    image_shape: tuple[int, int],
+    center_xy: tuple[float, float] | np.ndarray,
+    radius_px: float,
+) -> np.ndarray:
+    """단일 흡착 컵 원판의 boolean 마스크.
+
+    suction_collision(비활성 컵 충돌)·single_cup(흡착점 선택)에서 컵 영역
+    공통 헬퍼로 사용된다. compute_single_cup_footprint 는 inside-ratio 만
+    필요해 기존 cup_inside_ratio 를 쓰므로 이 함수를 호출하지 않는다.
+    """
+    height, width = image_shape[:2]
+    region = np.zeros((height, width), dtype=bool)
+    cx = float(center_xy[0])
+    cy = float(center_xy[1])
+    radius = float(radius_px)
+    if not np.isfinite(radius) or radius <= 0.0:
+        return region
+
+    x_min = max(0, int(np.floor(cx - radius)))
+    x_max = min(width - 1, int(np.ceil(cx + radius)))
+    y_min = max(0, int(np.floor(cy - radius)))
+    y_max = min(height - 1, int(np.ceil(cy + radius)))
+    if x_max < x_min or y_max < y_min:
+        return region
+
+    yy, xx = np.mgrid[y_min : y_max + 1, x_min : x_max + 1]
+    disk = (xx - cx) ** 2 + (yy - cy) ** 2 <= radius * radius
+    region[y_min : y_max + 1, x_min : x_max + 1] = disk
+    return region
+
+
+def cup_radius_px_at_depth(cup_diameter_mm: float, depth_mm: float, intrinsic: np.ndarray) -> float:
+    """깊이 depth_mm 에서 컵 반경의 픽셀 크기."""
+    fx = float(intrinsic[0, 0])
+    fy = float(intrinsic[1, 1])
+    focal = (fx + fy) * 0.5
+    if depth_mm <= 0.0:
+        return 0.0
+    return (float(cup_diameter_mm) * 0.5) * focal / float(depth_mm)
+
+
+def compute_single_cup_footprint(
+    mask: np.ndarray,
+    center_xy: tuple[int, int] | np.ndarray,
+    depth_mm: float,
+    intrinsic: np.ndarray,
+    axis_xy: np.ndarray,
+    cup_diameter_mm: float = DEFAULT_CUP_DIAMETER_MM,
+    min_cup_inside_ratio: float = DEFAULT_MIN_CUP_INSIDE_RATIO,
+) -> SuctionFootprint | None:
+    """컵 1개짜리 SuctionFootprint. cup_centers_xy 길이=1, spacing=0."""
+    if intrinsic is None or depth_mm <= 0:
+        return None
+    radius_px = cup_radius_px_at_depth(cup_diameter_mm, depth_mm, intrinsic)
+    if not np.isfinite(radius_px) or radius_px <= 0.0:
+        return None
+
+    axis = np.asarray(axis_xy, dtype=np.float64).reshape(2)
+    axis_norm = np.linalg.norm(axis)
+    axis = axis / axis_norm if axis_norm >= 1e-9 else np.array([1.0, 0.0], dtype=np.float64)
+
+    center = np.asarray(center_xy, dtype=np.float64).reshape(2)
+    ratio = cup_inside_ratio(mask, center, radius_px)
+    feasible = ratio >= float(min_cup_inside_ratio)
+    return SuctionFootprint(
+        feasible=bool(feasible),
+        reason=None if feasible else "cup_outside_mask",
+        depth_mm=float(depth_mm),
+        cup_diameter_mm=float(cup_diameter_mm),
+        cup_center_spacing_mm=0.0,
+        cup_radius_px=float(radius_px),
+        cup_center_spacing_px=0.0,
+        axis_xy=[float(axis[0]), float(axis[1])],
+        cup_centers_xy=[[float(center[0]), float(center[1])]],
+        cup_inside_ratios=[float(ratio)],
+        # 듀얼컵 계약과 동일하게 min_cup_inside_ratio = min(cup_inside_ratios).
+        # 단일컵은 컵이 1개라 그 값이 곧 ratio.
+        min_cup_inside_ratio=float(ratio),
+        required_min_cup_inside_ratio=float(min_cup_inside_ratio),
+    )
