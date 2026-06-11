@@ -156,12 +156,17 @@ class SuctionPipeline:
             if selected is None:
                 return None, None, candidates, sc_debug
             u, v, depth_mm, footprint, surface_debug = selected
-            point_camera = pixel_to_camera(u, v, depth_mm, intrinsic)
+            # 출력점 = 두 컵의 중점(헤드 중심 TCP) — 듀얼컵 계약과 통일.
+            # 평탄성·이웃·충돌 판정은 활성 컵(u,v) 기준으로 끝났고, 로봇에 내보내는
+            # 점만 중점으로 옮긴다. 깊이는 활성 컵 z0(=depth_mm) 유지(single_cup 참고).
+            head_xy = surface_debug.get("head_center_xy") or [float(u), float(v)]
+            hu, hv = float(head_xy[0]), float(head_xy[1])
+            point_camera = pixel_to_camera(hu, hv, depth_mm, intrinsic)
             point_robot = transform_point(point_camera, extrinsic)
             normal_camera = self._selected_surface_normal(surface_debug, normal_image, u, v, binary_mask)
             normal_robot = orient_normal_z_up(transform_normal(normal_camera, extrinsic))
             reference_camera = self._selected_surface_reference_camera(
-                surface_debug, binary_mask, u, v, depth_mm, intrinsic, point_camera, normal_camera,
+                surface_debug, binary_mask, hu, hv, depth_mm, intrinsic, point_camera, normal_camera,
             )
             reference_robot = project_to_tangent(transform_direction(reference_camera, extrinsic), normal_robot)
             quaternion = approach_and_reference_to_quaternion(normal_robot, reference_robot)

@@ -223,6 +223,19 @@ def select_single_cup_suction(
             attempts.append(reject)
             continue
 
+        # 듀얼컵 출력 계약과 통일: 로봇 출력점(헤드 중심 TCP)은 '두 컵의 중점'.
+        # 단일컵은 활성 컵(u,v) + 비활성(팬텀) 컵(best_dir 방향 spacing_px)의 중점이다.
+        # 깊이는 활성 컵 z0 를 유지한다(중점은 비활성 컵 쪽 빈 공간일 수 있어 그
+        # 픽셀 depth 를 재측정하면 헤드가 기운다 — 둘 다 같은 평탄면이므로 z0 가 옳다).
+        inactive_cup_xy = [
+            float(u) + float(best_dir[0]) * spacing_px,
+            float(v) + float(best_dir[1]) * spacing_px,
+        ]
+        head_center_xy = [
+            0.5 * (float(u) + inactive_cup_xy[0]),
+            0.5 * (float(v) + inactive_cup_xy[1]),
+        ]
+
         surface_debug: dict[str, Any] = {
             "passed": True,
             "reason": None,
@@ -232,6 +245,9 @@ def select_single_cup_suction(
             "candidate_index": index,
             "candidate_source": candidate.get("source", "unknown"),
             "surface_center_xy": [u, v],
+            "active_cup_xy": [u, v],
+            "inactive_cup_xy": inactive_cup_xy,
+            "head_center_xy": head_center_xy,
             "surface_area": int(np.count_nonzero(mask > 0)),
             "object_area": int(np.count_nonzero(mask > 0)),
             "surface_area_ratio": 1.0,
