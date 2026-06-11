@@ -1,13 +1,13 @@
 model:
   checkpoint: facebook/mask2former-swin-large-coco-instance
-  weights: weights/mask2former/strong_aug.pt
+  weights: weights/mask2former/acc_str.pt
 input:
   size: [866, 1035]
 crop:
   enabled: true
-  tolerance: 0.0
+  tolerance: 0.05
 postprocess:
-  prediction_threshold: 0.7
-  mask_threshold: 0.8
-  overlap_threshold: 0.2
-  min_instance_area: 1200.0
+  prediction_threshold: 0.8
+  mask_threshold: 0.6
+  overlap_threshold: 0.4
+  min_instance_area: 1000.0

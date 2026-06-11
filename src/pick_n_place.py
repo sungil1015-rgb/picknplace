@@ -362,6 +362,7 @@ class PickNPlace:
                 instance.class_similarity = class_prediction.similarity
                 instance.class_vote_ratio = class_prediction.vote_ratio
                 instance.class_margin = class_prediction.margin
+                instance.class_reject_reason = class_prediction.reject_reason
                 instance.class_neighbor_indices = class_prediction.neighbor_indices
                 instance.class_neighbor_labels = class_prediction.neighbor_labels
                 instance.class_neighbor_similarities = class_prediction.neighbor_similarities
@@ -496,9 +497,14 @@ class PickNPlace:
             color = (0, 0, 255) if is_grasp_target else (0, 180, 0)
             thickness = 4 if is_grasp_target else 2
             cv2.polylines(vis_img, [pts], True, color, thickness)
-            label = getattr(predictions[index], "label", index) if index < len(predictions) else index
 
-            contour_center = np.mean(pts, axis=0).astype(int)
+            anchor_xy = np.mean(pts, axis=0).astype(int)
+            if index < len(predictions):
+                surface_debug = getattr(predictions[index], "suction_surface", None)
+                if isinstance(surface_debug, dict):
+                    center_xy = surface_debug.get("surface_center_xy")
+                    if isinstance(center_xy, list) and len(center_xy) == 2:
+                        anchor_xy = np.asarray([int(center_xy[0]), int(center_xy[1])], dtype=np.int32)
             if is_grasp_target:
                 priority = getattr(predictions[index], "grasp_priority", None) if index < len(predictions) else None
                 depth = getattr(predictions[index], "grasp_object_depth", None) if index < len(predictions) else None
@@ -512,7 +518,7 @@ class PickNPlace:
                 cv2.putText(vis_img, target_text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
                 cv2.drawMarker(
                     vis_img,
-                    tuple(contour_center),
+                    tuple(anchor_xy),
                     color,
                     markerType=cv2.MARKER_CROSS,
                     markerSize=28,
@@ -520,18 +526,71 @@ class PickNPlace:
                     line_type=cv2.LINE_AA,
                 )
             else:
-                cv2.putText(vis_img, str(label), tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
-                cv2.circle(vis_img, tuple(contour_center), 5, (0, 255, 255), -1, cv2.LINE_AA)
+                cv2.circle(vis_img, tuple(anchor_xy), 5, (0, 255, 255), -1, cv2.LINE_AA)
+
+            if index < len(predictions):
+                self._draw_class4_cap_marker(vis_img, predictions[index], color)
 
             if suction_pts and index < len(suction_pts) and suction_pts[index]:
                 point_info = suction_pts[index][0]
                 if isinstance(point_info, (list, tuple)) and len(point_info) == 2:
                     position = point_info[0]
                     quaternion = point_info[1]
-                    self._draw_suction_debug(vis_img, contour_center, position, quaternion)
+                    self._draw_suction_debug(vis_img, anchor_xy, position, quaternion)
 
         cv2.imwrite(full_path, vis_img)
         self.logger.info(f"[{self.name}] save_result: {full_path}")
+
+    @staticmethod
+    def _draw_class4_cap_marker(
+            image: np.ndarray,
+            prediction: Any,
+            color: tuple[int, int, int],
+    ) -> None:
+        if PickNPlace._prediction_class_id(prediction) != 4:
+            return
+        cap_xy = PickNPlace._class4_cap_center_xy(prediction)
+        if cap_xy is None:
+            return
+        x, y = cap_xy
+        half = 14
+        top_left = (max(0, x - half), max(0, y - half))
+        bottom_right = (min(image.shape[1] - 1, x + half), min(image.shape[0] - 1, y + half))
+        cv2.rectangle(image, top_left, bottom_right, (255, 255, 255), 4, cv2.LINE_AA)
+        cv2.rectangle(image, top_left, bottom_right, color, 2, cv2.LINE_AA)
+
+    @staticmethod
+    def _prediction_class_id(prediction: Any) -> Optional[int]:
+        for attr in ("class_index", "label"):
+            value = getattr(prediction, attr, None)
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    @staticmethod
+    def _class4_cap_center_xy(prediction: Any) -> Optional[tuple[int, int]]:
+        surface_debug = getattr(prediction, "suction_surface", None)
+        if not isinstance(surface_debug, dict):
+            return None
+        class4_debug = surface_debug.get("class4_bottle")
+        if not isinstance(class4_debug, dict):
+            fallback = surface_debug.get("class4_bottle_fallback")
+            if isinstance(fallback, dict):
+                class4_debug = fallback.get("class4_bottle")
+        if not isinstance(class4_debug, dict):
+            return None
+        debug = class4_debug.get("debug")
+        if not isinstance(debug, dict):
+            return None
+        cap_xy = debug.get("cap_center_xy") or debug.get("cap_anchor_xy")
+        if not isinstance(cap_xy, list) or len(cap_xy) != 2:
+            return None
+        try:
+            return int(cap_xy[0]), int(cap_xy[1])
+        except (TypeError, ValueError):
+            return None
 
     def _draw_suction_debug(
             self,

@@ -15,6 +15,7 @@ from PIL import Image
 @dataclass(frozen=True)
 class DinoV2KnnSettings:
     model_name: str
+    use_fast: bool
     reference_bank: str
     top_k: int
     crop_padding: int
@@ -30,6 +31,10 @@ class DinoV2KnnSettings:
     min_similarity: Optional[float]
     min_vote_ratio: Optional[float]
     min_margin: Optional[float]
+    min_class_score_by_class: dict[int, float]
+    min_similarity_by_class: dict[int, float]
+    min_vote_ratio_by_class: dict[int, float]
+    min_margin_by_class: dict[int, float]
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,10 @@ class ClassPrediction:
     neighbor_indices: list[int]
     neighbor_labels: list[int]
     neighbor_similarities: list[float]
+    reject_reason: Optional[str] = None
+    class_probabilities: Optional[dict[int, float]] = None
+    centroid_similarities: Optional[dict[int, float]] = None
+    nearest_similarities: Optional[dict[int, float]] = None
 
 
 def _load_yaml(path: str | Path | None) -> dict[str, Any]:
@@ -109,6 +118,7 @@ def _settings_from_config(config_file: str | Path) -> DinoV2KnnSettings:
         raise ValueError("DINOv2 classifier config 'patch_mean_source' must be 'masked' or 'unmasked'")
     return DinoV2KnnSettings(
         model_name=str(classifier_cfg["model_name"]),
+        use_fast=bool(classifier_cfg.get("use_fast", False)),
         reference_bank=str(classifier_cfg["reference_bank"]),
         top_k=int(classifier_cfg["top_k"]),
         crop_padding=int(classifier_cfg["crop_padding"]),
@@ -124,11 +134,60 @@ def _settings_from_config(config_file: str | Path) -> DinoV2KnnSettings:
         min_similarity=float(min_similarity) if min_similarity is not None else None,
         min_vote_ratio=float(min_vote_ratio) if min_vote_ratio is not None else None,
         min_margin=float(min_margin) if min_margin is not None else None,
+        min_class_score_by_class=_optional_float_map(
+            classifier_cfg.get("min_class_score_by_class"),
+            "min_class_score_by_class",
+        ),
+        min_similarity_by_class=_optional_float_map(
+            classifier_cfg.get("min_similarity_by_class"),
+            "min_similarity_by_class",
+        ),
+        min_vote_ratio_by_class=_optional_float_map(
+            classifier_cfg.get("min_vote_ratio_by_class"),
+            "min_vote_ratio_by_class",
+        ),
+        min_margin_by_class=_optional_float_map(
+            classifier_cfg.get("min_margin_by_class"),
+            "min_margin_by_class",
+        ),
     )
 
 
 def _optional_float(value: Any) -> Optional[float]:
     return float(value) if value is not None else None
+
+
+def _optional_float_map(value: Any, key_name: str) -> dict[int, float]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"DINOv2 classifier config '{key_name}' must be a mapping of class index to float"
+        )
+
+    parsed: dict[int, float] = {}
+    for raw_key, raw_value in value.items():
+        if raw_value is None:
+            continue
+        try:
+            class_index = int(raw_key)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"DINOv2 classifier config '{key_name}' has non-integer class key: {raw_key!r}") from exc
+        parsed[class_index] = float(raw_value)
+    return parsed
+
+
+def _threshold_for_class(
+    thresholds: dict[int, float],
+    class_index: int,
+    class_id: int,
+    default: Optional[float],
+) -> Optional[float]:
+    if class_id in thresholds:
+        return thresholds[class_id]
+    if class_index in thresholds:
+        return thresholds[class_index]
+    return default
 
 
 def _to_pil_rgb(image: np.ndarray | Image.Image) -> Image.Image:
@@ -204,6 +263,7 @@ class DinoV2KnnClassifier:
         if reference_bank is not None:
             self.settings = DinoV2KnnSettings(
                 model_name=self.settings.model_name,
+                use_fast=self.settings.use_fast,
                 reference_bank=str(reference_bank),
                 top_k=self.settings.top_k,
                 crop_padding=self.settings.crop_padding,
@@ -219,6 +279,10 @@ class DinoV2KnnClassifier:
                 min_similarity=self.settings.min_similarity,
                 min_vote_ratio=self.settings.min_vote_ratio,
                 min_margin=self.settings.min_margin,
+                min_class_score_by_class=self.settings.min_class_score_by_class,
+                min_similarity_by_class=self.settings.min_similarity_by_class,
+                min_vote_ratio_by_class=self.settings.min_vote_ratio_by_class,
+                min_margin_by_class=self.settings.min_margin_by_class,
             )
         self.device = _resolve_device(device)
 
@@ -319,7 +383,10 @@ class DinoV2KnnClassifier:
     def _load_model(self) -> None:
         from transformers import AutoImageProcessor, AutoModel
 
-        self.processor = AutoImageProcessor.from_pretrained(self.settings.model_name)
+        self.processor = AutoImageProcessor.from_pretrained(
+            self.settings.model_name,
+            use_fast=self.settings.use_fast,
+        )
         self.model = AutoModel.from_pretrained(self.settings.model_name).to(self.device)
         self.model.eval()
 
@@ -481,18 +548,43 @@ class DinoV2KnnClassifier:
 
         class_name = self.label_to_class_name.get(class_index, str(class_index))
         class_id = _numeric_label(class_name, class_index)
+        min_class_score = _threshold_for_class(
+            self.settings.min_class_score_by_class,
+            class_index,
+            class_id,
+            self.settings.min_class_score,
+        )
+        min_similarity = _threshold_for_class(
+            self.settings.min_similarity_by_class,
+            class_index,
+            class_id,
+            self.settings.min_similarity,
+        )
+        min_vote_ratio = _threshold_for_class(
+            self.settings.min_vote_ratio_by_class,
+            class_index,
+            class_id,
+            self.settings.min_vote_ratio,
+        )
+        min_margin = _threshold_for_class(
+            self.settings.min_margin_by_class,
+            class_index,
+            class_id,
+            self.settings.min_margin,
+        )
 
-        is_unknown = False
-        if self.settings.min_class_score is not None and class_score < self.settings.min_class_score:
-            is_unknown = True
-        if self.settings.min_similarity is not None and similarity < self.settings.min_similarity:
-            is_unknown = True
-        if self.settings.min_vote_ratio is not None and vote_ratio < self.settings.min_vote_ratio:
-            is_unknown = True
-        if self.settings.min_margin is not None and margin < self.settings.min_margin:
-            is_unknown = True
+        reject_reasons: list[str] = []
+        if min_class_score is not None and class_score < min_class_score:
+            reject_reasons.append("low_class_score")
+        if min_similarity is not None and similarity < min_similarity:
+            reject_reasons.append("low_similarity")
+        if min_vote_ratio is not None and vote_ratio < min_vote_ratio:
+            reject_reasons.append("low_vote_ratio")
+        if min_margin is not None and margin < min_margin:
+            reject_reasons.append("low_margin")
 
-        if is_unknown:
+        reject_reason = ",".join(reject_reasons) if reject_reasons else None
+        if reject_reason is not None:
             class_index = UNKNOWN_CLASS_ID
             class_name = "unknown"
             class_id = UNKNOWN_CLASS_ID
@@ -508,6 +600,7 @@ class DinoV2KnnClassifier:
             neighbor_indices=[int(index.item()) for index in top_indices],
             neighbor_labels=[int(label.item()) for label in top_labels],
             neighbor_similarities=[float(value.item()) for value in top_values],
+            reject_reason=reject_reason,
         )
 
     def classify_instance(

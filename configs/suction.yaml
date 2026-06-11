@@ -14,23 +14,17 @@ suction:
     diameter_mm: 25.0
     center_spacing_mm: 35.0
 
-  # 2D mask 기반 suction 후보점 생성.
-  candidates:
-    count: 8
-    min_distance_px: 50.0
-    pca_offset_px: 50.0
-
   # normal surface를 찾아 suction point를 면 중심으로 이동한다.
   normal_surface:
     enabled: true
-    angle_threshold_deg: 13.0
+    angle_threshold_deg: 18.0
+    candidate_max_count: 3
 
     cluster:
       max_count: 5
 
     morphology:
       open_kernel_px: 1
-      close_kernel_px: 1
       fill_holes_max_area_px: 50.0
       fill_holes_max_aspect_ratio: 4.0
 
@@ -40,36 +34,47 @@ suction:
 
     min_region:
       area_ratio: 0.1
-      area_px: 3000.0
+      area_px: 2000.0
 
     class3_depth_split:
       enabled: true
-      min_gap_mm: 0.8
+      min_gap_mm: 0.9
       trim_low_percentile: 1.0
       trim_high_percentile: 99.0
       cut_band_mm: 1.0
-      bridge_open_kernel_px: 1
+      bridge_open_kernel_px: 2
       line_cut_enabled: true
-      line_cut_thickness_px: 7
-      line_cut_min_aspect_ratio: 1.8
+      line_cut_thickness_px: 3
+      line_cut_min_aspect_ratio: 1.5
       min_layer_area_px: 300
       min_layer_area_ratio: 0.08
       min_component_area_px: 300
+
+  # class4 투명 물통은 장축 양끝을 비교해서 depth가 안정적인 쪽을 뚜껑 후보로 본다.
+  class4_bottle:
+    cap_depth_percentile: 3.0
+    cap_depth_band_mm: 15.0
+    cap_anchor_percentile: 3.0
+    cap_anchor_band_mm: 5.0
+    min_cap_anchor_area_px: 30
+    cap_open_kernel_px: 3
+    cap_close_kernel_px: 7
+    min_cap_area_px: 300
+    cap_normal_window_px: 20
+    min_cap_normal_pixels: 10
+    point_source: mask_center
+    endpoint_fraction: 0.142857
+    endpoint_valid_ratio_margin: 0.12
+    min_endpoint_valid_px: 30
+    min_endpoint_valid_ratio: 0.85
 
   # 실험/내부 튜닝값. 평소에는 위 strategy/cup/candidates/normal_surface 위주로 조정한다.
   advanced:
     # suction point 주변 depth/normal 계산 window(pixel).
     depth_window: 10
     normal_window: 20
-
-    candidate_min_offset_px: 5.0
-    candidate_clearance_offset_ratio: 0.8
-
-    # 현재 footprint는 선택 reject 기준으로 쓰지 않고 debug/시각화용으로만 남긴다.
-    footprint:
-      min_cup_inside_ratio: 0.75
-      min_object_coverage: 0.8
-      min_surface_coverage: 0.5
+    normal_outlier_angle_deg: 30.0
+    normal_min_valid_pixels: 20
 
     # normal surface의 장축을 구할 때 minAreaRect를 우선 사용하고, 불안정하면 PCA/object mask로 fallback한다.
     axis:

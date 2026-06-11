@@ -18,7 +18,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from runner.modes.utils.option_manager import load_option_file
 from src.pick_n_place import PickNPlace
-from src.utils.crop import DEFAULT_SEGMENTATION_ROI_2013
 from src.utils.depth import median_valid_depth_at_point
 from src.utils.geometry import quaternion_to_rotation_matrix
 from src.utils.mask import largest_component_mask, mask_center_point
@@ -26,10 +25,6 @@ from src.utils.suction_evaluation import normal_z_score
 from src.utils.suction_footprint import (
     compute_dual_cup_footprint,
 )
-
-
-DEBUG_ROI_2013 = DEFAULT_SEGMENTATION_ROI_2013
-
 
 def _build_logger() -> logging.Logger:
     logger = logging.getLogger("debug_local")
@@ -251,17 +246,57 @@ def _class_color(class_id: Any) -> tuple[int, int, int]:
         return palette[0]
 
 
-def _draw_class_label(
+def _draw_class4_cap_marker(
     image: np.ndarray,
-    class_id: Any,
-    xy: tuple[int, int],
+    prediction: Any,
     color: tuple[int, int, int],
 ) -> None:
-    x = int(max(0, xy[0]))
-    y = int(max(18, xy[1]))
-    text = f"class {class_id}"
-    cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 4, cv2.LINE_AA)
-    cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+    if _prediction_class_id(prediction) != 4:
+        return
+    cap_xy = _class4_cap_center_xy(prediction)
+    if cap_xy is None:
+        return
+    x, y = cap_xy
+    half = 14
+    top_left = (max(0, x - half), max(0, y - half))
+    bottom_right = (min(image.shape[1] - 1, x + half), min(image.shape[0] - 1, y + half))
+    cv2.rectangle(image, top_left, bottom_right, (255, 255, 255), 4, cv2.LINE_AA)
+    cv2.rectangle(image, top_left, bottom_right, color, 2, cv2.LINE_AA)
+
+
+def _prediction_class_id(prediction: Any) -> int | None:
+    if prediction is None:
+        return None
+    for attr in ("class_index", "label"):
+        value = getattr(prediction, attr, None)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _class4_cap_center_xy(prediction: Any) -> tuple[int, int] | None:
+    surface_debug = getattr(prediction, "suction_surface", None)
+    if not isinstance(surface_debug, dict):
+        return None
+    class4_debug = surface_debug.get("class4_bottle")
+    if not isinstance(class4_debug, dict):
+        fallback = surface_debug.get("class4_bottle_fallback")
+        if isinstance(fallback, dict):
+            class4_debug = fallback.get("class4_bottle")
+    if not isinstance(class4_debug, dict):
+        return None
+    debug = class4_debug.get("debug")
+    if not isinstance(debug, dict):
+        return None
+    cap_xy = debug.get("cap_center_xy") or debug.get("cap_anchor_xy")
+    if not isinstance(cap_xy, list) or len(cap_xy) != 2:
+        return None
+    try:
+        return int(cap_xy[0]), int(cap_xy[1])
+    except (TypeError, ValueError):
+        return None
 
 
 def _finite_float(value: Any) -> float | None:
@@ -496,8 +531,7 @@ def _render_debug(
                 if is_suction_debug_target:
                     _draw_z_axis(overlay, grasp_xy, point[1], intrinsic=intrinsic, extrinsic=extrinsic, origin_robot_xyz=grasp_xyz)
 
-        if not is_grasp_target:
-            _draw_class_label(overlay, class_id, tuple(points[0].tolist()), color)
+        _draw_class4_cap_marker(overlay, prediction, color)
 
         summaries.append(
             {
@@ -638,7 +672,7 @@ def run_debug(args: argparse.Namespace) -> None:
             depth_image=depth,
             normal_image=normal,
             compute_suction_pts=False,
-            roi_2d=DEBUG_ROI_2013,
+            roi_2d=list(getattr(model, "segmentation_roi", [])),
         )
         _compute_debug_suction_top_k(
             model,

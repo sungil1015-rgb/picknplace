@@ -17,11 +17,11 @@ def clustered_normal_surface_candidates(
     min_area_px: int,
     max_clusters: int,
     open_kernel_px: int,
-    close_kernel_px: int,
     fill_holes_max_area_px: int,
     fill_holes_max_aspect_ratio: float,
     center_method: str,
     rect_max_area_ratio: float,
+    max_candidates: int = 5,
 ) -> list[tuple[np.ndarray | None, dict[str, Any]]]:
     normals, valid = normalize_normal_image(normal_image)
     mask_bool = mask > 0
@@ -45,8 +45,11 @@ def clustered_normal_surface_candidates(
     attempts: list[tuple[np.ndarray | None, dict[str, Any]]] = []
     cos_threshold = float(np.cos(np.deg2rad(float(angle_threshold_deg))))
     max_count = max(1, int(max_clusters))
+    max_candidate_count = max(1, int(max_candidates))
 
     for cluster_index in range(max_count):
+        if len(attempts) >= max_candidate_count:
+            break
         ys, xs = np.where(remaining)
         if xs.size == 0:
             break
@@ -66,7 +69,6 @@ def clustered_normal_surface_candidates(
         cleaned, cleanup_debug = _cleanup(
             cluster,
             open_kernel_px,
-            close_kernel_px,
             fill_holes_max_area_px,
             fill_holes_max_aspect_ratio,
         )
@@ -95,33 +97,58 @@ def clustered_normal_surface_candidates(
         component_ids.sort(key=lambda label: int(stats[label, cv2.CC_STAT_AREA]), reverse=True)
 
         for component_rank, label in enumerate(component_ids):
-            surface = labels == label
+            if len(attempts) >= max_candidate_count:
+                break
             surface_area = int(stats[label, cv2.CC_STAT_AREA])
             if surface_area <= 0:
                 continue
+            area_ratio = float(surface_area / object_area)
+            passed = area_ratio >= float(min_area_ratio) and surface_area >= int(min_area_px)
+            if not passed:
+                reason = "surface_too_small"
+                if surface_area < int(min_area_px):
+                    reason = "surface_area_px_too_small"
+                attempts.append(
+                    (
+                        None,
+                        {
+                            "passed": False,
+                            "reason": reason,
+                            "normal_surface_mode": "clustered",
+                            "cluster_index": int(cluster_index),
+                            "component_index": int(label),
+                            "component_rank": int(component_rank),
+                            "cluster_seed_support": int(seed_support),
+                            "surface_area": surface_area,
+                            "object_area": object_area,
+                            "surface_area_ratio": area_ratio,
+                            "min_surface_region_area_ratio": float(min_area_ratio),
+                            "min_surface_region_area_px": int(min_area_px),
+                            "angle_threshold_deg": float(angle_threshold_deg),
+                            "surface_raw_pixels": raw_pixels,
+                        },
+                    )
+                )
+                # Components are sorted by area, so the rest of this cluster cannot pass area checks.
+                break
+
+            surface = labels == label
             surface_normal = _mean_normal(normal_map[surface])
             if surface_normal is None:
                 surface_normal = seed_normal
-            area_ratio = float(surface_area / object_area)
             center_u, center_v, center_debug = _surface_center(
                 surface,
                 mask_bool,
                 center_method,
                 rect_max_area_ratio,
             )
-            passed = area_ratio >= float(min_area_ratio) and surface_area >= int(min_area_px)
-            reason = None
-            if not passed:
-                reason = "surface_too_small"
-                if surface_area < int(min_area_px):
-                    reason = "surface_area_px_too_small"
 
             attempts.append(
                 (
-                    surface if passed else None,
+                    surface,
                     {
-                        "passed": bool(passed),
-                        "reason": reason,
+                        "passed": True,
+                        "reason": None,
                         "normal_surface_mode": "clustered",
                         "cluster_index": int(cluster_index),
                         "component_index": int(label),
@@ -139,7 +166,6 @@ def clustered_normal_surface_candidates(
                         "seed_normal": [float(value) for value in surface_normal],
                         "surface_raw_pixels": raw_pixels,
                         "surface_open_kernel_px": int(open_kernel_px),
-                        "surface_close_kernel_px": int(close_kernel_px),
                         **cleanup_debug,
                         "surface_center_method": str(center_method),
                         "surface_center_used_method": center_debug["used_method"],
@@ -166,6 +192,72 @@ def clustered_normal_surface_candidates(
             },
         )
     ]
+
+
+def compact_surface_attempt_debug(debug: dict[str, Any]) -> dict[str, Any]:
+    keep_keys = (
+        "passed",
+        "reason",
+        "suction_reject_reason",
+        "selected",
+        "candidate_index",
+        "candidate_source",
+        "normal_surface_mode",
+        "cluster_index",
+        "component_index",
+        "component_rank",
+        "surface_center_xy",
+        "surface_area",
+        "object_area",
+        "surface_area_ratio",
+        "normal_z_score",
+        "robot_z_tilt_deg",
+        "suction_area_pixels",
+        "suction_footprint_check_used",
+        "footprint_axis_source",
+        "footprint_axis_xy",
+    )
+    compact = {key: debug[key] for key in keep_keys if key in debug}
+    coverage = debug.get("suction_area_check")
+    if isinstance(coverage, dict):
+        compact["suction_area_check"] = {
+            key: coverage.get(key)
+            for key in (
+                "passed",
+                "reason",
+                "object_coverage",
+                "surface_coverage",
+                "suction_area_pixels",
+            )
+            if key in coverage
+        }
+    split = debug.get("class3_depth_split")
+    if isinstance(split, dict):
+        compact["class3_depth_split"] = {
+            key: split.get(key)
+            for key in (
+                "enabled",
+                "reason",
+                "max_depth_gap_mm",
+                "split_depth_mm",
+                "line_cut_applied",
+                "line_cut_reason",
+                "near_layer_area",
+                "far_layer_area",
+                "selected_layer",
+            )
+            if key in split
+        }
+    return compact
+
+
+def surface_center_from_method(
+    surface: np.ndarray,
+    object_mask: np.ndarray,
+    center_method: str,
+    rect_max_area_ratio: float,
+) -> tuple[int, int, dict[str, Any]]:
+    return _surface_center(surface, object_mask, center_method, rect_max_area_ratio)
 
 
 def _dominant_normal(values: np.ndarray) -> tuple[np.ndarray | None, int]:
@@ -198,7 +290,6 @@ def _mean_normal(values: np.ndarray) -> np.ndarray | None:
 def _cleanup(
     surface: np.ndarray,
     open_kernel_px: int,
-    close_kernel_px: int,
     fill_holes_max_area_px: int,
     fill_holes_max_aspect_ratio: float,
 ) -> tuple[np.ndarray, dict[str, Any]]:

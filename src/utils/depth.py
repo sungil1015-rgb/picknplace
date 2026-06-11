@@ -293,3 +293,4 @@ def _largest_depth_layer_component(
     if best_mask is None or best_area < int(min_component_area_px):
         return None, None, {**debug, "selected_component_area": int(best_area)}
     return best_mask, best_layer, {**debug, "selected_component_area": int(best_area)}
+

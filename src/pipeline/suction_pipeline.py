@@ -17,7 +17,11 @@ from src.utils.geometry import (
 from src.utils.class4_bottle import estimate_class4_bottle_surface
 from src.utils.depth import median_valid_depth_at_point, split_surface_by_depth_gap
 from src.utils.mask import largest_component_mask, mask_center_point
-from src.utils.normal_surface import clustered_normal_surface_candidates
+from src.utils.normal_surface import (
+    compact_surface_attempt_debug,
+    clustered_normal_surface_candidates,
+    surface_center_from_method,
+)
 from src.utils.suction_evaluation import (
     normal_z_score,
     suction_area_coverage,
@@ -37,6 +41,9 @@ class SuctionPipeline:
         self.config = config
         self.depth_window = int(config.depth_window)
         self.normal_window = int(config.normal_window)
+        self.normal_outlier_angle_deg = float(config.normal_outlier_angle_deg)
+        self.normal_min_valid_pixels = int(config.normal_min_valid_pixels)
+        self.normal_surface_candidate_max_count = int(config.normal_surface_candidate_max_count)
         self.cup_diameter_mm = float(config.cup_diameter_mm)
         self.cup_center_spacing_mm = float(config.cup_center_spacing_mm)
         self.min_cup_inside_ratio = float(config.min_cup_inside_ratio)
@@ -45,15 +52,9 @@ class SuctionPipeline:
             int(class_index): self._normalize_suction_strategy(strategy)
             for class_index, strategy in config.suction_strategy_by_class.items()
         }
-        self.candidate_count = int(config.candidate_count)
-        self.candidate_min_distance_px = float(config.candidate_min_distance_px)
-        self.pca_offset_px = float(config.pca_offset_px)
-        self.candidate_min_offset_px = float(config.candidate_min_offset_px)
-        self.candidate_clearance_offset_ratio = float(config.candidate_clearance_offset_ratio)
         self.normal_surface_enabled = bool(config.normal_surface_enabled)
         self.surface_angle_threshold_deg = float(config.surface_angle_threshold_deg)
         self.surface_open_kernel_px = int(config.surface_open_kernel_px)
-        self.surface_close_kernel_px = int(config.surface_close_kernel_px)
         self.surface_fill_holes_max_area_px = int(config.surface_fill_holes_max_area_px)
         self.surface_fill_holes_max_aspect_ratio = float(config.surface_fill_holes_max_aspect_ratio)
         self.surface_center_method = str(config.surface_center_method)
@@ -73,6 +74,21 @@ class SuctionPipeline:
         self.class3_depth_split_min_layer_area_px = int(config.class3_depth_split_min_layer_area_px)
         self.class3_depth_split_min_layer_area_ratio = float(config.class3_depth_split_min_layer_area_ratio)
         self.class3_depth_split_min_component_area_px = int(config.class3_depth_split_min_component_area_px)
+        self.class4_bottle_cap_depth_percentile = float(config.class4_bottle_cap_depth_percentile)
+        self.class4_bottle_cap_depth_band_mm = float(config.class4_bottle_cap_depth_band_mm)
+        self.class4_bottle_cap_anchor_percentile = float(config.class4_bottle_cap_anchor_percentile)
+        self.class4_bottle_cap_anchor_band_mm = float(config.class4_bottle_cap_anchor_band_mm)
+        self.class4_bottle_min_cap_anchor_area_px = int(config.class4_bottle_min_cap_anchor_area_px)
+        self.class4_bottle_cap_open_kernel_px = int(config.class4_bottle_cap_open_kernel_px)
+        self.class4_bottle_cap_close_kernel_px = int(config.class4_bottle_cap_close_kernel_px)
+        self.class4_bottle_min_cap_area_px = int(config.class4_bottle_min_cap_area_px)
+        self.class4_bottle_cap_normal_window_px = int(config.class4_bottle_cap_normal_window_px)
+        self.class4_bottle_min_cap_normal_pixels = int(config.class4_bottle_min_cap_normal_pixels)
+        self.class4_bottle_point_source = str(config.class4_bottle_point_source)
+        self.class4_bottle_endpoint_fraction = float(config.class4_bottle_endpoint_fraction)
+        self.class4_bottle_endpoint_valid_ratio_margin = float(config.class4_bottle_endpoint_valid_ratio_margin)
+        self.class4_bottle_min_endpoint_valid_px = int(config.class4_bottle_min_endpoint_valid_px)
+        self.class4_bottle_min_endpoint_valid_ratio = float(config.class4_bottle_min_endpoint_valid_ratio)
         self.min_suction_area_object_coverage = float(config.min_suction_area_object_coverage)
         self.min_suction_area_surface_coverage = float(config.min_suction_area_surface_coverage)
         self.axis_min_area_px = int(config.axis_min_area_px)
@@ -284,7 +300,27 @@ class SuctionPipeline:
         normal_image: np.ndarray | None,
         intrinsic: np.ndarray,
     ) -> tuple[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]] | None, dict[str, Any] | None]:
-        estimate = estimate_class4_bottle_surface(mask, depth_image, normal_image, intrinsic)
+        estimate = estimate_class4_bottle_surface(
+            mask,
+            depth_image,
+            normal_image,
+            intrinsic,
+            cap_depth_percentile=self.class4_bottle_cap_depth_percentile,
+            cap_depth_band_mm=self.class4_bottle_cap_depth_band_mm,
+            cap_anchor_percentile=self.class4_bottle_cap_anchor_percentile,
+            cap_anchor_band_mm=self.class4_bottle_cap_anchor_band_mm,
+            min_cap_anchor_area_px=self.class4_bottle_min_cap_anchor_area_px,
+            cap_open_kernel_px=self.class4_bottle_cap_open_kernel_px,
+            cap_close_kernel_px=self.class4_bottle_cap_close_kernel_px,
+            min_cap_area_px=self.class4_bottle_min_cap_area_px,
+            cap_normal_window_px=self.class4_bottle_cap_normal_window_px,
+            min_cap_normal_pixels=self.class4_bottle_min_cap_normal_pixels,
+            point_source=self.class4_bottle_point_source,
+            endpoint_fraction=self.class4_bottle_endpoint_fraction,
+            endpoint_valid_ratio_margin=self.class4_bottle_endpoint_valid_ratio_margin,
+            min_endpoint_valid_px=self.class4_bottle_min_endpoint_valid_px,
+            min_endpoint_valid_ratio=self.class4_bottle_min_endpoint_valid_ratio,
+        )
         estimate_debug = estimate.to_debug_dict()
         if not estimate.passed or estimate.point_xy is None or estimate.depth_mm is None or estimate.normal_camera is None:
             return None, {
@@ -392,11 +428,11 @@ class SuctionPipeline:
             min_area_px=self.min_surface_region_area_px,
             max_clusters=self.normal_cluster_max_count,
             open_kernel_px=self.surface_open_kernel_px,
-            close_kernel_px=self.surface_close_kernel_px,
             fill_holes_max_area_px=self.surface_fill_holes_max_area_px,
             fill_holes_max_aspect_ratio=self.surface_fill_holes_max_aspect_ratio,
             center_method=self.surface_center_method,
             rect_max_area_ratio=self.surface_rect_max_area_ratio,
+            max_candidates=self.normal_surface_candidate_max_count,
         )
         for index, (surface, surface_debug) in enumerate(surfaces):
             surface_debug["candidate_index"] = int(index)
@@ -465,7 +501,7 @@ class SuctionPipeline:
             selected_debug["selection_reason"] = "min_robot_z_tilt_among_clustered_surfaces"
             selected_debug["attempts"] = [
                 {
-                    **dict(attempt),
+                    **compact_surface_attempt_debug(attempt),
                     "selected": int(attempt.get("candidate_index", -1)) == int(selected_debug.get("candidate_index", -2)),
                 }
                 for attempt in attempts
@@ -476,7 +512,7 @@ class SuctionPipeline:
             "passed": False,
             "reason": "no_normal_cluster_surface_passed",
             "normal_surface_mode": "clustered",
-            "attempts": attempts,
+            "attempts": [compact_surface_attempt_debug(attempt) for attempt in attempts],
         }
 
     def _refine_class3_surface_by_depth(
@@ -513,7 +549,13 @@ class SuctionPipeline:
         surface_area = int(np.count_nonzero(refined_surface))
         object_area = max(int(np.count_nonzero(object_mask > 0)), 1)
         area_ratio = float(surface_area / object_area)
-        center_xy = list(self._depth_refined_surface_center(refined_surface))
+        center_u, center_v, center_debug = surface_center_from_method(
+            refined_surface,
+            object_mask > 0,
+            self.surface_center_method,
+            self.surface_rect_max_area_ratio,
+        )
+        center_xy = [int(center_u), int(center_v)]
         refined_debug.update(
             {
                 "surface_area_before_depth_split": int(surface_debug.get("surface_area", 0)),
@@ -523,6 +565,12 @@ class SuctionPipeline:
                 "surface_center_xy": center_xy,
                 "component_seed_xy": center_xy,
                 "seed_xy": center_xy,
+                "surface_center_used_method": center_debug["used_method"],
+                "surface_center_fallback_reason": center_debug.get("fallback_reason"),
+                "surface_rect_area": center_debug.get("rect_area"),
+                "surface_rect_area_ratio": center_debug.get("rect_area_ratio"),
+                "surface_rect_box_xy": center_debug.get("rect_box_xy"),
+                "surface_rect_center_xy": center_debug.get("rect_center_xy"),
             }
         )
         if area_ratio < self.min_surface_region_area_ratio or surface_area < self.min_surface_region_area_px:
@@ -531,15 +579,6 @@ class SuctionPipeline:
             refined_debug["suction_reject_reason"] = "class3_depth_surface_too_small"
             return None, refined_debug
         return refined_surface, refined_debug
-
-    @staticmethod
-    def _depth_refined_surface_center(surface: np.ndarray) -> tuple[int, int]:
-        distance = cv2.distanceTransform((surface > 0).astype(np.uint8), cv2.DIST_L2, 5)
-        if np.any(distance > 0):
-            y, x = np.unravel_index(int(np.argmax(distance)), distance.shape)
-            return int(x), int(y)
-        center = mask_center_point(surface)
-        return int(center[0]), int(center[1])
 
     @staticmethod
     def _robot_z_tilt_deg(surface_debug: dict[str, Any], extrinsic: np.ndarray) -> float:
@@ -689,20 +728,16 @@ class SuctionPipeline:
         return axis, float(major / minor), area
 
     def _generate_suction_candidates(self, mask: np.ndarray) -> list[dict[str, Any]]:
-        max_count = max(1, self.candidate_count)
-        min_dist_sq = max(0.0, self.candidate_min_distance_px) ** 2
         candidates: list[dict[str, Any]] = []
 
         def add_candidate(u: int, v: int, source: str) -> bool:
-            if len(candidates) >= max_count:
-                return False
             if not (0 <= v < mask.shape[0] and 0 <= u < mask.shape[1]):
                 return False
             if not bool(mask[v, u]):
                 return False
             for candidate in candidates:
                 prev_u, prev_v = candidate["xy"]
-                if (u - prev_u) ** 2 + (v - prev_v) ** 2 < min_dist_sq:
+                if u == prev_u and v == prev_v:
                     return False
             candidates.append({"xy": [int(u), int(v)], "source": source})
             return True
@@ -712,10 +747,7 @@ class SuctionPipeline:
 
         center_u, center_v = mask_center_point(mask)
         add_candidate(center_u, center_v, "mask_center")
-
-        self._add_pca_offset_candidates(mask, distance, center_u, center_v, add_candidate)
-        self._add_distance_transform_candidates(distance, add_candidate, lambda: len(candidates) < max_count)
-        return candidates[:max_count]
+        return candidates
 
     def _add_best_distance_transform_candidate(self, distance: np.ndarray, add_candidate: Any) -> None:
         if not np.any(distance > 0):
@@ -724,60 +756,6 @@ class SuctionPipeline:
         y, x = np.unravel_index(flat_index, distance.shape)
         if distance[y, x] > 0:
             add_candidate(int(x), int(y), "distance_transform")
-
-    def _add_distance_transform_candidates(self, distance: np.ndarray, add_candidate: Any, has_capacity: Any) -> None:
-        if not np.any(distance > 0):
-            return
-        for flat_index in np.argsort(distance.ravel())[::-1]:
-            if not has_capacity():
-                break
-            y, x = np.unravel_index(int(flat_index), distance.shape)
-            if distance[y, x] <= 0:
-                break
-            add_candidate(int(x), int(y), "distance_transform")
-
-    def _add_pca_offset_candidates(
-        self,
-        mask: np.ndarray,
-        distance: np.ndarray,
-        center_u: int,
-        center_v: int,
-        add_candidate: Any,
-    ) -> None:
-        axis = principal_axis_2d(mask)
-        orthogonal = np.array([-axis[1], axis[0]], dtype=np.float64)
-        center_clearance = float(distance[center_v, center_u]) if distance.size else 0.0
-        offset = self.pca_offset_px
-        if center_clearance > 0.0:
-            offset = min(offset, max(self.candidate_min_offset_px, center_clearance * self.candidate_clearance_offset_ratio))
-        if offset <= 0.0:
-            return
-
-        for source, direction in (
-            ("pca_long_axis", axis),
-            ("pca_long_axis", -axis),
-            ("pca_short_axis", orthogonal),
-            ("pca_short_axis", -orthogonal),
-        ):
-            point = np.array([center_u, center_v], dtype=np.float64) + direction * offset
-            u = int(round(float(point[0])))
-            v = int(round(float(point[1])))
-            if 0 <= v < mask.shape[0] and 0 <= u < mask.shape[1] and bool(mask[v, u]):
-                add_candidate(u, v, source)
-                continue
-            nearest = self._nearest_mask_point(mask, point)
-            if nearest is not None:
-                add_candidate(nearest[0], nearest[1], source)
-
-    @staticmethod
-    def _nearest_mask_point(mask: np.ndarray, point_xy: np.ndarray) -> tuple[int, int] | None:
-        coords_yx = np.column_stack(np.where(mask > 0))
-        if coords_yx.shape[0] == 0:
-            return None
-        coords_xy = coords_yx[:, ::-1].astype(np.float64)
-        distances = np.sum((coords_xy - point_xy.reshape(2)) ** 2, axis=1)
-        nearest = coords_xy[int(np.argmin(distances))]
-        return int(round(float(nearest[0]))), int(round(float(nearest[1])))
 
     def _principal_reference_camera(
         self,
@@ -816,12 +794,11 @@ class SuctionPipeline:
         if isinstance(surface_debug, dict):
             axis = surface_debug.get("footprint_axis_xy")
             if isinstance(axis, list) and len(axis) == 2:
-                reference = self._short_axis_reference_camera(axis, u, v, depth_mm, intrinsic, center_camera, normal_camera)
+                reference = self._axis_reference_camera(axis, u, v, depth_mm, intrinsic, center_camera)
                 if reference is not None:
                     return reference
         long_reference = self._principal_reference_camera(mask, u, v, depth_mm, intrinsic, center_camera)
-        short_reference = self._short_reference_from_long(long_reference, normal_camera)
-        return short_reference if short_reference is not None else long_reference
+        return long_reference
 
     def _short_axis_reference_camera(
         self,
@@ -892,7 +869,7 @@ class SuctionPipeline:
                 norm = float(np.linalg.norm(normal))
                 if norm >= 1e-9:
                     return normal / norm
-        return self._mean_valid_normal(normal_image, u, v, mask)
+        return self._robust_valid_normal(normal_image, u, v, mask)
 
     def _median_valid_depth_depthless(self, fallback_depth: float, mask: np.ndarray, u: int, v: int) -> float:
         half = self.depth_window // 2
@@ -906,15 +883,16 @@ class SuctionPipeline:
             return float(fallback_depth)
         return float(fallback_depth)
 
-    def _mean_valid_normal(
+    def _robust_valid_normal(
         self,
         normal_image: np.ndarray | None,
         u: int,
         v: int,
         mask: np.ndarray,
     ) -> np.ndarray:
+        fallback = np.array([0.0, 0.0, 1.0], dtype=np.float64)
         if normal_image is None:
-            return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+            return fallback
 
         half = self.normal_window // 2
         y1 = max(0, v - half)
@@ -925,18 +903,46 @@ class SuctionPipeline:
         normal_patch = normal_image[y1:y2, x1:x2]
         mask_patch = mask[y1:y2, x1:x2] > 0
         normals = normal_patch[mask_patch]
-        if normals.size == 0:
-            normals = normal_image[mask > 0]
-        if normals.size == 0:
-            return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        normal = self._robust_normal_from_values(normals)
+        if normal is not None:
+            return normal
+
+        height = min(normal_image.shape[0], mask.shape[0])
+        width = min(normal_image.shape[1], mask.shape[1])
+        mask_values = normal_image[:height, :width][mask[:height, :width] > 0]
+        normal = self._robust_normal_from_values(mask_values)
+        return normal if normal is not None else fallback
+
+    def _robust_normal_from_values(self, values: np.ndarray) -> np.ndarray | None:
+        normals = np.asarray(values, dtype=np.float64).reshape(-1, 3)
+        if normals.shape[0] < max(1, self.normal_min_valid_pixels):
+            return None
+
+        finite = np.isfinite(normals).all(axis=1)
+        normals = normals[finite]
+        if normals.shape[0] < max(1, self.normal_min_valid_pixels):
+            return None
 
         norms = np.linalg.norm(normals, axis=1)
         normals = normals[norms > 1e-6]
-        if normals.size == 0:
-            return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        norms = norms[norms > 1e-6]
+        if normals.shape[0] < max(1, self.normal_min_valid_pixels):
+            return None
+        normals = normals / norms.reshape(-1, 1)
 
-        normal = normals.mean(axis=0).astype(np.float64)
-        norm = np.linalg.norm(normal)
+        median_normal = np.median(normals, axis=0)
+        median_norm = float(np.linalg.norm(median_normal))
+        if median_norm < 1e-6:
+            return None
+        median_normal = median_normal / median_norm
+
+        cos_threshold = float(np.cos(np.deg2rad(self.normal_outlier_angle_deg)))
+        inliers = normals[(normals @ median_normal) >= cos_threshold]
+        if inliers.shape[0] < max(1, self.normal_min_valid_pixels):
+            return None
+
+        normal = inliers.mean(axis=0)
+        norm = float(np.linalg.norm(normal))
         if norm < 1e-6:
-            return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+            return None
         return normal / norm
