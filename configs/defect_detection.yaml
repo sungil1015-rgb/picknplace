@@ -1,0 +1,108 @@
+# 결함 탐지 설정 (per-class detector 등록)
+#
+# class_index 매핑 (reference_bank paths 역추적으로 확정, 2026-06-10):
+#   0 = haribo       (raw label 1)
+#   1 = mango        (raw label 2)
+#   2 = pencil_case  (raw label 3)
+#   3 = metal_case   (raw label 4)
+#   4 = bottle       (raw label 5)
+#   5 = unknown (object는 reference에 없어 unknown으로 분류)
+#
+# memory bank 파일명은 polygon class_id 기준 (라벨링 data.yaml: alphabet 순)이므로
+# yaml class_id (= classifier class_index) 와 memory_bank 파일명이 직접 일치 안 함에 주의.
+#
+# threshold는 strict LOO ROC (정상 LOO vs 합성 결함 5 변형/객체) F1-best 기반.
+# 결과 (2026-06-10):
+#   metal_case  AUROC 0.998, τ=9.0  (F1-best 8.93, TPR 100%, FPR 4%)
+#   pencil_case AUROC 0.986, τ=9.2  (F1-best 9.12, TPR 96%, FPR 5%)
+#   haribo      AUROC 0.929, τ=8.6  (F1-best 8.59, TPR 81%, FPR 5%)
+#   mango       AUROC 0.704        - 분리 약함 (sub-type 섞임), enabled=false (운영 시 위험)
+# 금요일 로봇 테스트에서 실 데이터 false rate 보고 재tune.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-06-12 갱신:
+#  - mango: "sub-type 섞임" 진단 기각. 실원인 = 라벨 오염 1건 + 합성 tear 절대픽셀
+#    스케일 희석. 라벨 정제 (mango_exclude_list.txt) + bank v2 재빌드 + 비율 tear
+#    (3~7%) + fusion (PatchCore + normal Laplacian z 가중) 적용.
+#    LOO ROC: AUROC 0.704 → 0.880. 95% CI [0.850, 0.917]. 24.5ms/객체 (A5000).
+#    상세: notes/MANGO_QUANT_EVAL.md
+#
+#  - layer ablation (11 layer × 4 class, 비율 tear, strict LOO) 최적 결과:
+#       class         최적 layer           AUROC      현재 yaml
+#       metal_case    L7 + top_k           0.999 SEP  L8 (전환 후보, FPR 4%→1%)
+#       pencil_case   L5 또는 L11          0.996      L8 (안전 유지)
+#       haribo        L7 단일              0.913      L8 (cascade 유지)
+#       mango         L8 단일              0.870      L8 (fusion 신규)
+#                     L4+L8+L11 결합       0.888      multilayer 옵션
+#    L7/multilayer 메모리뱅크는 outputs/eda/memory_banks/ 에 보관.
+#    운영 layer 변경은 로봇 테스트 후 결정 (가장 안전).
+#    상세: notes/LAYER_ABLATION_REPORT.md
+# ─────────────────────────────────────────────────────────────────────────────
+
+enabled: true
+
+detectors:
+  # 0: haribo (LOO CV=0.191, ROC AUROC=0.929, F1-best τ=8.59)
+  0:
+    type: cascade
+    enabled: true
+    memory_bank: weights/patchcore_haribo.npz
+    color_prior: weights/color_gmm_haribo.npz
+    signals:
+      patchcore:
+        threshold: 8.6
+      color:
+        z_threshold: 3.0
+        outlier_ratio_threshold: 0.10
+      normal_laplacian:
+        peak_threshold: 0.30
+        peak_ratio_threshold: 0.05
+      topology:
+        raggedness_threshold: 1.8
+    voting_min: 2
+    action: reject
+
+  # 1: mango — 2026-06-12 근본 원인 분석 후 fusion으로 재설계.
+  #    (구 "sub-type 섞임" 진단은 기각 — 실원인: 라벨 오염 1건 + tail 정상모드 + 합성 tear 스케일 희석)
+  #    bank v2 (오염 제외, 309 obj). 비율 tear (3~7%) LOO 재평가: AUROC 0.880 (max), TPR 70%/FPR 5% @ τ=p95.
+  #    fusion = 0.75 * z(PatchCore max) + 0.25 * z(normal Laplacian) — 찢김 기하 신호 보조.
+  #    enabled는 실물 찢김 테스트 (로봇 테스트에서 1~2봉지 투입) 후 전환.
+  #    주의: Laplacian 채널 TPR은 합성으로 검증 불가 (RGB만 합성) — w=0.25는 사전 설정값.
+  1:
+    type: fusion
+    enabled: false      # 실물 찢김 TPR 검증 후 true 전환
+    memory_bank: weights/patchcore_mango_v2.npz
+    threshold: 1.8      # fused z. 정상 z_pc p99=1.98 기준 0.75*1.98+margin. 실측 후 재tune
+    pc_mu: 7.95         # 정상 LOO score 평균 (recovery_eval_mango.json, max agg)
+    pc_sigma: 1.18
+    lap_weight: 0.25
+    lap_peak_threshold: 0.30   # cascade 컨벤션과 동일
+    lap_mu: 0.0         # 실측 normal map 통계로 갱신 예정 (로봇 테스트 warm-up)
+    lap_sigma: 1.0
+    lap_erosion_px: 7
+    dinov2_layer: 8
+    patch_aggregate: max       # top_k는 mango에서 AUROC 하락 (0.816 vs 0.880) — 소형 tear 신호 희석
+    action: reject
+
+  # 2: pencil_case (LOO CV=0.354 outlier 4개 비닐 영향, ROC AUROC=0.986, F1-best τ=9.12)
+  2:
+    type: patchcore
+    enabled: true
+    memory_bank: weights/patchcore_pencil_case.npz
+    threshold: 9.2
+    dinov2_layer: 8
+    patch_aggregate: max
+    action: reject
+
+  # 3: metal_case (LOO CV=0.112, ROC AUROC=0.998, F1-best τ=8.93. 가장 강력)
+  3:
+    type: patchcore
+    enabled: true
+    memory_bank: weights/patchcore_metal_case.npz
+    threshold: 9.0
+    dinov2_layer: 8
+    patch_aggregate: max
+    action: reject
+
+  # 4: bottle - 투명 plastic 몸통 → 빛 투과로 mask 안에 다른 객체 patches 들어감 → 제외
+  # 5: unknown - bypass (classifier 거름)

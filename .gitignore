@@ -16,6 +16,20 @@ result_*.json
 weights/*.pth
 weights/*.pt
 weights/*.onnx
+weights/*.npz
+weights/*.npy
+weights/*.safetensors
+
+# 평가 산출물 (binary + 그림, 별도 공유)
+outputs/
+*.npz
+*.npy
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+*.pdf
 
 # IDE
 .vscode/
