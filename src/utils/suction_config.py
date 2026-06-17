@@ -46,6 +46,10 @@ class SuctionConfig:
     normal_surface_candidate_max_count: int
     cup_diameter_mm: float
     cup_center_spacing_mm: float
+    collision_guard_enabled: bool
+    collision_guard_box_roi: tuple[float, float, float, float]
+    collision_guard_wall_margin_ratio: float
+    collision_guard_min_outward_wall_component: float
     min_cup_inside_ratio: float
     suction_strategy_default: str
     suction_strategy_by_class: dict[int, str]
@@ -97,6 +101,7 @@ class SuctionConfig:
     def from_mapping(cls, mapping: dict[str, Any]) -> "SuctionConfig":
         strategy_cfg = mapping.get("strategy", mapping.get("suction_strategy", {}))
         cup_cfg = _section(mapping, "cup")
+        collision_guard_cfg = _section(mapping, "collision_guard")
         normal_cfg = _section(mapping, "normal_surface")
         cluster_cfg = _section(normal_cfg, "cluster")
         morphology_cfg = _section(normal_cfg, "morphology")
@@ -114,6 +119,10 @@ class SuctionConfig:
             normal_surface_candidate_max_count=int(_get(mapping, normal_cfg, "candidate_max_count", "normal_surface_candidate_max_count", 3)),
             cup_diameter_mm=float(_get(mapping, cup_cfg, "diameter_mm", "cup_diameter_mm")),
             cup_center_spacing_mm=float(_get(mapping, cup_cfg, "center_spacing_mm", "cup_center_spacing_mm")),
+            collision_guard_enabled=as_bool(collision_guard_cfg.get("enabled", False)),
+            collision_guard_box_roi=_box_roi(collision_guard_cfg.get("box_roi", [300.0, 1080.0, 0.0, 512.0])),
+            collision_guard_wall_margin_ratio=float(collision_guard_cfg.get("wall_margin_ratio", 0.1)),
+            collision_guard_min_outward_wall_component=float(collision_guard_cfg.get("min_outward_wall_component", 0.15)),
             min_cup_inside_ratio=float(_get(mapping, {}, "min_cup_inside_ratio", "min_cup_inside_ratio", 0.75)),
             suction_strategy_default=str(strategy_cfg.get("default", "normal")) if isinstance(strategy_cfg, dict) else "normal",
             suction_strategy_by_class=_strategy_by_class(strategy_cfg),
@@ -161,6 +170,15 @@ class SuctionConfig:
             axis_min_pca_ratio=float(_get(mapping, axis_cfg, "min_pca_ratio", "axis_min_pca_ratio")),
             axis_reference_step_px=float(_get(mapping, axis_cfg, "reference_step_px", "axis_reference_step_px")),
         )
+
+
+def _box_roi(value: Any) -> tuple[float, float, float, float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        raise ValueError("suction config 'collision_guard.box_roi' must contain [left, right, top, bottom]")
+    left, right, top, bottom = [float(item) for item in value]
+    if right <= left or bottom <= top:
+        raise ValueError("suction config 'collision_guard.box_roi' must satisfy right > left and bottom > top")
+    return left, right, top, bottom
 
 
 def _strategy_by_class(strategy_cfg: Any) -> dict[int, str]:

@@ -14,6 +14,13 @@ suction:
     diameter_mm: 25.0
     center_spacing_mm: 35.0
 
+  # 박스 벽 근처에서는 suction z축이 벽 쪽으로 기울지 않도록 보정한다.
+  collision_guard:
+    enabled: true
+    box_roi: [300.0, 1080.0, 0.0, 512.0]
+    wall_margin_ratio: 0.10
+    min_outward_wall_component: 0.15
+
   # normal surface를 찾아 suction point를 면 중심으로 이동한다.
   normal_surface:
     enabled: true

@@ -17,6 +17,8 @@ class DinoV2KnnSettings:
     model_name: str
     use_fast: bool
     reference_bank: str
+    feature_layer: Optional[int]
+    crop_mode: str
     top_k: int
     crop_padding: int
     masked_crop: bool
@@ -120,6 +122,12 @@ def _settings_from_config(config_file: str | Path) -> DinoV2KnnSettings:
         model_name=str(classifier_cfg["model_name"]),
         use_fast=bool(classifier_cfg.get("use_fast", False)),
         reference_bank=str(classifier_cfg["reference_bank"]),
+        feature_layer=(
+            int(classifier_cfg["feature_layer"])
+            if classifier_cfg.get("feature_layer") is not None
+            else None
+        ),
+        crop_mode=str(classifier_cfg.get("crop_mode", "bbox_square")).lower(),
         top_k=int(classifier_cfg["top_k"]),
         crop_padding=int(classifier_cfg["crop_padding"]),
         masked_crop=bool(classifier_cfg["masked_crop"]),
@@ -265,6 +273,8 @@ class DinoV2KnnClassifier:
                 model_name=self.settings.model_name,
                 use_fast=self.settings.use_fast,
                 reference_bank=str(reference_bank),
+                feature_layer=self.settings.feature_layer,
+                crop_mode=self.settings.crop_mode,
                 top_k=self.settings.top_k,
                 crop_padding=self.settings.crop_padding,
                 masked_crop=self.settings.masked_crop,
@@ -290,6 +300,7 @@ class DinoV2KnnClassifier:
         self.label_to_class_name: dict[int, str] = {}
         self.rgb_weight = 0.5
         self.gray_weight = 0.5
+        self.feature_layer = self.settings.feature_layer
         self.embeddings: torch.Tensor
         self.labels: torch.Tensor
         self._load_reference_bank()
@@ -307,6 +318,10 @@ class DinoV2KnnClassifier:
         bank_gray_weight = float(bank.get("gray_weight", bank.get("shape_weight", self.gray_weight)))
         self.rgb_weight = self.settings.rgb_weight if self.settings.rgb_weight is not None else bank_rgb_weight
         self.gray_weight = self.settings.gray_weight if self.settings.gray_weight is not None else bank_gray_weight
+        if self.feature_layer is None:
+            feature_layers = bank.get("feature_layers")
+            if isinstance(feature_layers, Sequence) and len(feature_layers) == 1:
+                self.feature_layer = int(feature_layers[0])
 
         if self._has_runtime_fusion_embeddings(bank):
             rgb_embeddings = self._fuse_bank_view_embedding(bank, "rgb")
@@ -396,6 +411,18 @@ class DinoV2KnnClassifier:
         mask: Optional[np.ndarray] = None,
         bbox: Optional[np.ndarray] = None,
     ) -> tuple[Image.Image, Optional[np.ndarray]]:
+        if self.settings.crop_mode in ("min_area_rect_square", "minrect_square", "aligned_minrect_square"):
+            aligned = self._crop_instance_min_area_rect_square(image_bgr, mask)
+            if aligned is not None:
+                return aligned
+        return self._crop_instance_bbox_square(image_bgr, mask=mask, bbox=bbox)
+
+    def _crop_instance_bbox_square(
+        self,
+        image_bgr: np.ndarray,
+        mask: Optional[np.ndarray] = None,
+        bbox: Optional[np.ndarray] = None,
+    ) -> tuple[Image.Image, Optional[np.ndarray]]:
         height, width = image_bgr.shape[:2]
         if mask is not None and np.any(mask):
             mask_bool = mask > 0
@@ -447,6 +474,87 @@ class DinoV2KnnClassifier:
         crop[~crop_mask_bool] = self.INSTANCE_CROP_BACKGROUND
         return _to_pil_rgb(crop), crop_mask_bool.astype(np.uint8)
 
+    def _crop_instance_min_area_rect_square(
+        self,
+        image_bgr: np.ndarray,
+        mask: Optional[np.ndarray],
+    ) -> tuple[Image.Image, Optional[np.ndarray]] | None:
+        if mask is None or not np.any(mask):
+            return None
+
+        mask_bool = mask > 0
+        coords_yx = np.column_stack(np.where(mask_bool))
+        if coords_yx.shape[0] < 3:
+            return None
+
+        coords_xy = coords_yx[:, ::-1].astype(np.float32)
+        rect = cv2.minAreaRect(coords_xy)
+        box = cv2.boxPoints(rect).astype(np.float32)
+        ordered = self._order_box_points(box)
+
+        width_a = float(np.linalg.norm(ordered[2] - ordered[3]))
+        width_b = float(np.linalg.norm(ordered[1] - ordered[0]))
+        height_a = float(np.linalg.norm(ordered[1] - ordered[2]))
+        height_b = float(np.linalg.norm(ordered[0] - ordered[3]))
+        rect_w = max(1, int(round(max(width_a, width_b))))
+        rect_h = max(1, int(round(max(height_a, height_b))))
+        if rect_w <= 0 or rect_h <= 0:
+            return None
+
+        dst = np.array(
+            [
+                [0.0, 0.0],
+                [rect_w - 1.0, 0.0],
+                [rect_w - 1.0, rect_h - 1.0],
+                [0.0, rect_h - 1.0],
+            ],
+            dtype=np.float32,
+        )
+        transform = cv2.getPerspectiveTransform(ordered, dst)
+        warped = cv2.warpPerspective(
+            image_bgr,
+            transform,
+            (rect_w, rect_h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(self.INSTANCE_CROP_BACKGROUND,) * 3,
+        )
+        warped_mask = cv2.warpPerspective(
+            mask_bool.astype(np.uint8),
+            transform,
+            (rect_w, rect_h),
+            flags=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        ).astype(bool)
+
+        if rect_h > rect_w:
+            warped = cv2.rotate(warped, cv2.ROTATE_90_CLOCKWISE)
+            warped_mask = cv2.rotate(warped_mask.astype(np.uint8), cv2.ROTATE_90_CLOCKWISE).astype(bool)
+            rect_h, rect_w = rect_w, rect_h
+
+        side = max(rect_w, rect_h)
+        crop = np.full((side, side, 3), self.INSTANCE_CROP_BACKGROUND, dtype=np.uint8)
+        crop_mask = np.zeros((side, side), dtype=bool)
+        y0 = (side - rect_h) // 2
+        x0 = (side - rect_w) // 2
+        crop[y0 : y0 + rect_h, x0 : x0 + rect_w] = warped
+        crop_mask[y0 : y0 + rect_h, x0 : x0 + rect_w] = warped_mask
+        crop[~crop_mask] = self.INSTANCE_CROP_BACKGROUND
+        return _to_pil_rgb(crop), crop_mask.astype(np.uint8)
+
+    @staticmethod
+    def _order_box_points(points: np.ndarray) -> np.ndarray:
+        pts = np.asarray(points, dtype=np.float32).reshape(4, 2)
+        ordered = np.zeros((4, 2), dtype=np.float32)
+        sums = pts.sum(axis=1)
+        diffs = np.diff(pts, axis=1).reshape(4)
+        ordered[0] = pts[int(np.argmin(sums))]
+        ordered[2] = pts[int(np.argmax(sums))]
+        ordered[1] = pts[int(np.argmin(diffs))]
+        ordered[3] = pts[int(np.argmax(diffs))]
+        return ordered
+
     def _embed_images(
         self,
         images: Sequence[Image.Image],
@@ -455,8 +563,8 @@ class DinoV2KnnClassifier:
         inputs = self.processor(images=list(images), return_tensors="pt")
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
         with torch.no_grad():
-            outputs = self.model(**inputs)
-        tokens = outputs.last_hidden_state
+            outputs = self.model(**inputs, output_hidden_states=self.feature_layer is not None)
+        tokens = self._embedding_tokens(outputs)
         cls_embedding = tokens[:, 0]
         patch_tokens = tokens[:, 1:]
         patch_mean_embedding = self._masked_patch_mean(
@@ -469,6 +577,21 @@ class DinoV2KnnClassifier:
             + self.settings.patch_mean_weight * patch_mean_embedding
         )
         return F.normalize(embedding.float(), dim=-1)
+
+    def _embedding_tokens(self, outputs: Any) -> torch.Tensor:
+        if self.feature_layer is None:
+            return outputs.last_hidden_state
+
+        hidden_states = getattr(outputs, "hidden_states", None)
+        if hidden_states is None:
+            return outputs.last_hidden_state
+        hidden_index = int(self.feature_layer) + 1
+        if hidden_index < 0 or hidden_index >= len(hidden_states):
+            raise ValueError(
+                f"DINOv2 feature_layer {self.feature_layer} is out of range for "
+                f"{len(hidden_states) - 1} transformer block(s)"
+            )
+        return hidden_states[hidden_index]
 
     def _masked_patch_mean(
         self,
@@ -524,30 +647,33 @@ class DinoV2KnnClassifier:
         top_k = min(self.settings.top_k, int(similarities.numel()))
         top_values, top_indices = torch.topk(similarities, k=top_k)
         top_labels = self.labels[top_indices]
-        top_weights = torch.softmax(top_values / self.settings.knn_temperature, dim=0)
 
-        scores: dict[int, float] = {}
         counts: dict[int, int] = {}
         similarity_sums: dict[int, float] = {}
-        for label_tensor, similarity_tensor, weight_tensor in zip(top_labels, top_values, top_weights):
+        for label_tensor, similarity_tensor in zip(top_labels, top_values):
             label = int(label_tensor.item())
-            scores[label] = scores.get(label, 0.0) + float(weight_tensor.item())
             similarity_sums[label] = similarity_sums.get(label, 0.0) + float(similarity_tensor.item())
             counts[label] = counts.get(label, 0) + 1
 
-        class_index = max(scores, key=lambda label: (scores[label], similarity_sums[label], counts[label]))
-        class_score = scores[class_index]
+        class_index = max(
+            counts,
+            key=lambda label: (
+                counts[label],
+                similarity_sums[label] / max(counts[label], 1),
+                similarity_sums[label],
+            ),
+        )
         similarity = similarity_sums[class_index] / max(counts[class_index], 1)
         vote_ratio = counts[class_index] / max(float(top_k), 1.0)
         second_similarity = max(
-            (similarity_sums[label] / max(counts[label], 1) for label in scores if label != class_index),
+            (similarity_sums[label] / max(counts[label], 1) for label in counts if label != class_index),
             default=float("-inf"),
         )
         margin = similarity - second_similarity if second_similarity != float("-inf") else float("inf")
-        confidence = class_score
+        confidence = vote_ratio
 
         class_name = self.label_to_class_name.get(class_index, str(class_index))
-        class_id = _numeric_label(class_name, class_index)
+        class_id = int(class_index)
         min_class_score = _threshold_for_class(
             self.settings.min_class_score_by_class,
             class_index,
@@ -574,7 +700,7 @@ class DinoV2KnnClassifier:
         )
 
         reject_reasons: list[str] = []
-        if min_class_score is not None and class_score < min_class_score:
+        if min_class_score is not None and confidence < min_class_score:
             reject_reasons.append("low_class_score")
         if min_similarity is not None and similarity < min_similarity:
             reject_reasons.append("low_similarity")

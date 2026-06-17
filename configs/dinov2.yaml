@@ -2,26 +2,29 @@ classifier:
   enabled: true
   model_name: facebook/dinov2-large
   use_fast: true
-  reference_bank: weights/dinov2_reference_bank_crops_large2/all_reference_bank.pt
-  top_k: 5
+  reference_bank: weights/patchcore_dinov2_large_layers_12_18_23_v2/layer_23/all_reference_bank.pt
+  feature_layer: 23
+  crop_mode: min_area_rect_square
+  top_k: 8
   crop_padding: 0
   masked_crop: true
   masked_crop_background: 127
   cls_weight: 0.7
   patch_mean_weight: 0.3
   patch_mean_source: masked
-  rgb_weight: 0.8
-  gray_weight: 0.2
-  knn_temperature: 0.03
-  min_class_score: 0.5
-  min_similarity: 0.6
-  min_vote_ratio: 0.6
-  min_margin: 0.025
+  rgb_weight: 1.0
+  gray_weight: 0.0
+  min_similarity: 0.75
+  min_vote_ratio: 1.0
+  # null disables margin rejection. 0.0 still rejects negative margins.
+  min_margin:
   # Optional per-class overrides. Missing classes fall back to the global values above.
-  min_class_score_by_class: {}
+  # Class ids here use the internal/debug ids: 0..4. Unknown is 5.
+  # One-based bank labels/class_names are normalized to 0..4 when loaded.
   min_similarity_by_class:
-    2: 0.55
-    3: 0.55
+    0: 0.75
+    1: 0.80
+    2: 0.65
+    3: 0.65
   min_vote_ratio_by_class: {}
-  min_margin_by_class: 
-    0: 0.003
+  min_margin_by_class: {}

@@ -353,7 +353,7 @@ class PickNPlace:
 
         if self.classifier is not None:
             class_predictions = self.classifier.classify_instances(rgb_image, kept_predictions)
-            class_ids = [prediction.label for prediction in class_predictions]
+            class_ids = [prediction.class_index for prediction in class_predictions]
             for instance, class_prediction in zip(kept_predictions, class_predictions):
                 instance.label = class_prediction.label
                 instance.class_index = class_prediction.class_index
@@ -490,6 +490,7 @@ class PickNPlace:
 
         vis_img = rgb_img.copy()
         for index, polygon in enumerate(polygons):
+            object_number = index + 1
             pts = np.array(polygon, dtype=np.int32)
             if pts.ndim != 2 or pts.shape[0] < 3:
                 continue
@@ -497,6 +498,10 @@ class PickNPlace:
             color = (0, 0, 255) if is_grasp_target else (0, 180, 0)
             thickness = 4 if is_grasp_target else 2
             cv2.polylines(vis_img, [pts], True, color, thickness)
+            object_text_origin = tuple(np.maximum(pts.min(axis=0) + np.array([4, 24]), np.array([4, 24])).astype(int))
+            object_text = f"#{object_number}"
+            cv2.putText(vis_img, object_text, object_text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 4, cv2.LINE_AA)
+            cv2.putText(vis_img, object_text, object_text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
 
             anchor_xy = np.mean(pts, axis=0).astype(int)
             if index < len(predictions):

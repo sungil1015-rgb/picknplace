@@ -309,12 +309,14 @@ def _finite_float(value: Any) -> float | None:
     return number if np.isfinite(number) else None
 
 
-def _classification_debug(prediction: Any) -> dict[str, Any]:
+def _classification_debug(prediction: Any, object_number: int | None = None) -> dict[str, Any]:
     if prediction is None:
-        return {}
+        return {"object_number": object_number} if object_number is not None else {}
     bbox = getattr(prediction, "bbox", None)
     bbox_values = [] if bbox is None else list(np.asarray(bbox).reshape(-1))
     return {
+        "object_number": object_number,
+        "label": getattr(prediction, "label", None),
         "class_index": getattr(prediction, "class_index", None),
         "class_name": getattr(prediction, "class_name", None),
         "reject_reason": getattr(prediction, "class_reject_reason", None),
@@ -374,6 +376,19 @@ def _draw_grasp_target_label(
 
     origin = np.maximum(points.min(axis=0) + np.array([0, -12]), np.array([0, 24])).astype(int)
     origin_xy = (int(origin[0]), int(origin[1]))
+    cv2.putText(image, text, origin_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 5, cv2.LINE_AA)
+    cv2.putText(image, text, origin_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.85, color, 2, cv2.LINE_AA)
+
+
+def _draw_object_number(
+    image: np.ndarray,
+    points: np.ndarray,
+    object_number: int,
+    color: tuple[int, int, int],
+) -> None:
+    origin = np.maximum(points.min(axis=0) + np.array([4, 24]), np.array([4, 24])).astype(int)
+    origin_xy = (int(origin[0]), int(origin[1]))
+    text = f"#{object_number}"
     cv2.putText(image, text, origin_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 5, cv2.LINE_AA)
     cv2.putText(image, text, origin_xy, cv2.FONT_HERSHEY_SIMPLEX, 0.85, color, 2, cv2.LINE_AA)
 
@@ -481,6 +496,7 @@ def _render_debug(
     summaries: list[dict[str, Any]] = []
 
     for index, polygon in enumerate(polygons):
+        object_number = index + 1
         points = np.asarray(polygon, dtype=np.int32)
         if points.ndim != 2 or points.shape[0] < 3:
             continue
@@ -491,6 +507,7 @@ def _render_debug(
         color = (0, 0, 255) if is_grasp_target else _class_color(class_id)
         thickness = 4 if is_grasp_target else 2
         cv2.polylines(overlay, [points], True, color, thickness, cv2.LINE_AA)
+        _draw_object_number(overlay, points, object_number, color)
 
         prediction = predictions[index] if index < len(predictions) else None
         grasp_xy = _grasp_pixel(prediction, polygon) if prediction is not None else _grasp_pixel(None, polygon)
@@ -536,6 +553,7 @@ def _render_debug(
         summaries.append(
             {
                 "rank": index + 1,
+                "object_number": object_number,
                 "is_grasp_target": is_grasp_target,
                 "is_suction_debug_target": is_suction_debug_target,
                 "class_id": class_id,
@@ -544,7 +562,7 @@ def _render_debug(
                 "grasp_xyz": [float(value) for value in grasp_xyz[:3]] if grasp_xyz is not None else None,
                 "footprint": footprint_debug,
                 "priority": _priority_debug(prediction),
-                "classification": _classification_debug(prediction),
+                "classification": _classification_debug(prediction, object_number),
             }
         )
 

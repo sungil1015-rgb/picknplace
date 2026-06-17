@@ -15,12 +15,12 @@ import numpy as np
 from PIL import Image
 
 
-DEFAULT_FOCAL_TOLERANCE = 10.0
-DEFAULT_SEGMENTATION_ROI_2013 = [150.822, 1186.162, 0.0, 866.0]
+DEFAULT_FOCAL_TOLERANCE = 1.0
+DEFAULT_SEGMENTATION_ROI_2013_CMES = [200.0, 1180.0, 0.0, 650.0]
 
-CROP_BOX_BY_FOCAL_LENGTH: tuple[tuple[float, tuple[float, float, float, float]], ...] = (
-	(2013.0, (150.822, 0.0, 1186.162, 866.0)),
-	(1242.0, (200.718, 18.144, 961.63, 611.225)),
+SEGMENTATION_ROI_BY_FOCAL_LENGTH_CMES: tuple[tuple[float, tuple[float, float, float, float]], ...] = (
+	(2013.0, (200.0, 1180.0, 0.0, 650.0)),
+	(1242.0, (200.718, 961.63, 18.144, 611.225)),
 )
 #"2d_roi": ["118","1190","98",813"]
 
@@ -87,13 +87,13 @@ def normalize_crop_box(
 	return left, top, right, bottom
 
 
-def _normalize_crop_box(crop_box: tuple[float, float, float, float], image_size: tuple[int, int] | None = None) -> tuple[int, int, int, int]:
-	normalized = normalize_crop_box(crop_box, image_size=image_size, order="pil")
+def _normalize_cmes_roi(crop_box: tuple[float, float, float, float], image_size: tuple[int, int] | None = None) -> tuple[int, int, int, int]:
+	normalized = normalize_crop_box(crop_box, image_size=image_size, order="cmes")
 	if normalized is None and image_size is not None:
 		width, height = image_size
 		return 0, 0, width, height
 	if normalized is None:
-		x0, y0, x1, y1 = crop_box
+		x0, x1, y0, y1 = crop_box
 		return int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
 	return normalized
 
@@ -120,9 +120,9 @@ def resolve_crop_box_from_info(
 		return None
 	focal_length = (fx + fy) * 0.5
 
-	for target_focal_length, crop_box in CROP_BOX_BY_FOCAL_LENGTH:
+	for target_focal_length, crop_box in SEGMENTATION_ROI_BY_FOCAL_LENGTH_CMES:
 		if abs(focal_length - target_focal_length) <= tolerance:
-			return _normalize_crop_box(crop_box, image_size=image_size)
+			return _normalize_cmes_roi(crop_box, image_size=image_size)
 
 	return None
 

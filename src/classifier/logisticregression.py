@@ -13,7 +13,6 @@ from src.classifier.dinov2 import (
     ClassPrediction,
     DinoV2KnnClassifier,
     _load_yaml,
-    _numeric_label,
 )
 
 
@@ -191,7 +190,7 @@ class LogisticRegressionClassifier(DinoV2KnnClassifier):
 
         class_index = predicted_label
         class_name = self.label_to_class_name.get(predicted_label, str(predicted_label))
-        class_id = _numeric_label(class_name, predicted_label)
+        class_id = int(predicted_label)
         if reject_reason is not None:
             class_index = UNKNOWN_CLASS_ID
             class_name = "unknown"

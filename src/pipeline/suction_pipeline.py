@@ -5,6 +5,7 @@ from typing import Any, Sequence
 import cv2
 import numpy as np
 
+from src.utils.collision_guard import CollisionGuardConfig, guarded_normal_near_box_wall
 from src.utils.geometry import (
     approach_and_reference_to_quaternion,
     orient_normal_z_up,
@@ -46,6 +47,12 @@ class SuctionPipeline:
         self.normal_surface_candidate_max_count = int(config.normal_surface_candidate_max_count)
         self.cup_diameter_mm = float(config.cup_diameter_mm)
         self.cup_center_spacing_mm = float(config.cup_center_spacing_mm)
+        self.collision_guard = CollisionGuardConfig(
+            enabled=bool(config.collision_guard_enabled),
+            box_roi=tuple(config.collision_guard_box_roi),
+            wall_margin_ratio=float(config.collision_guard_wall_margin_ratio),
+            min_outward_wall_component=float(config.collision_guard_min_outward_wall_component),
+        )
         self.min_cup_inside_ratio = float(config.min_cup_inside_ratio)
         self.suction_strategy_default = self._normalize_suction_strategy(config.suction_strategy_default)
         self.suction_strategy_by_class = {
@@ -200,6 +207,16 @@ class SuctionPipeline:
         normal_camera = self._selected_surface_normal(surface_debug, normal_image, u, v, binary_mask)
         normal_robot = transform_normal(normal_camera, extrinsic)
         normal_robot = orient_normal_z_up(normal_robot)
+        normal_robot, collision_debug = guarded_normal_near_box_wall(
+            normal_robot,
+            u=int(u),
+            v=int(v),
+            depth_mm=float(depth_mm),
+            intrinsic=intrinsic,
+            extrinsic=extrinsic,
+            config=self.collision_guard,
+        )
+        surface_debug["collision_guard"] = collision_debug
 
         reference_camera = self._selected_surface_reference_camera(
             surface_debug,
