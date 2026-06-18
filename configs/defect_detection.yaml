@@ -81,21 +81,20 @@ detectors:
   #    fusion = 0.75 * z(PatchCore max) + 0.25 * z(normal Laplacian) — 찢김 기하 신호 보조.
   #    enabled는 실물 찢김 테스트 (로봇 테스트에서 1~2봉지 투입) 후 전환.
   #    주의: Laplacian 채널 TPR은 합성으로 검증 불가 (RGB만 합성) — w=0.25는 사전 설정값.
+  # 1: 젤리껌(mango) — "운에 맡김" 모드: fusion(미검증 Laplacian) 대신 plain patchcore로 운영.
+  #    근거: ① fusion의 Laplacian TPR은 합성검증 불가(미검증 부분), ② large 전환으로 fusion의
+  #    z-정규화 상수(pc_mu/sigma)가 무효, ③ 검증된 건 plain PatchCore 쪽(base AUROC 0.880 max).
+  #    이렇게 하면 다른 클래스와 동일하게 '뱅크 재빌드 + 임계 τ 튜닝' 두 가지로만 작동(수동 캘리브 0).
+  #    enabled:true — TPR 정량검증은 못 했으나 '정상에서 벗어나면 잡는다'는 작동은 함(운에 맡김).
+  #    추후 실물 찢김 데이터 + 캘리브 여유 생기면 type:fusion(pc_mu/sigma/lap_*)으로 전환 가능(코드 보존).
   1:
-    type: fusion
-    enabled: false      # 실물 찢김 TPR 검증 후 true 전환 (large 전환 후 pc_mu/sigma 재캘리브도 필요)
+    type: patchcore
+    enabled: true
     memory_bank: weights/patchcore_mango_v2.npz
-    threshold: 1.8      # TODO: large·L12 재튜닝 (base 값 무효)
-    pc_mu: 7.95         # ⚠ base L8/max 기준값 — large·L12 재빌드 후 재산출 필수
-    pc_sigma: 1.18      # ⚠ 동일 (large에서 무효)
-    lap_weight: 0.25
-    lap_peak_threshold: 0.30   # cascade 컨벤션과 동일
-    lap_mu: 0.0         # 실측 normal map 통계로 갱신 예정 (로봇 테스트 warm-up)
-    lap_sigma: 1.0
-    lap_erosion_px: 7
-    dinov2_layer: 12          # large 통일 (구 base best L8). large 예측 L16, 단일 강제 시. 재빌드 필요
+    threshold: 9.0           # placeholder — large·L12 LOO 튜닝값으로 교체(다른 클래스와 동일 절차)
+    dinov2_layer: 12
     model_name: facebook/dinov2-large
-    patch_aggregate: max       # top_k는 mango에서 AUROC 하락 (0.816 vs 0.880) — 소형 tear 신호 희석
+    patch_aggregate: max       # top_k는 mango에서 AUROC 하락(0.816 vs 0.880) — 소형 tear 신호 희석
     action: reject
 
   # 2: pencil_case — large/L12 통일 (구 base L8 0.986, ablation best L5; large 예측 L13, 단 쌍봉 L22 가능)
