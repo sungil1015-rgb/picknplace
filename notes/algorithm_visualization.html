@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Defect Detection Algorithm — Paper Figures</title>
+<style>
+  :root{
+    --ink:#15181f; --muted:#5b6472; --line:#cbd2dc;
+    --slate:#475569; --slate-bg:#eef1f5;
+    --indigo:#4338ca; --indigo-bg:#eef0fc;
+    --amber:#b45309; --amber-bg:#fdf3e3;
+    --green:#047857; --green-bg:#e9f6f0;
+    --red:#c0392b; --red-bg:#fdecea;
+    --mono:"SFMono-Regular",ui-monospace,"Cascadia Code",Consolas,monospace;
+    --serif:"Times New Roman",Georgia,serif;
+    --sans:-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#f5f6f8;color:var(--ink);font-family:var(--sans);
+       line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1320px;margin:0 auto;padding:48px 28px 80px}
+  header.doc{border-bottom:2px solid var(--ink);padding-bottom:18px;margin-bottom:8px}
+  header.doc h1{font-family:var(--serif);font-size:30px;margin:0 0 6px;letter-spacing:-.2px}
+  header.doc .sub{color:var(--muted);font-size:15px}
+  header.doc .meta{margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  figure{margin:46px 0 0;background:#fff;border:1px solid var(--line);border-radius:10px;
+         box-shadow:0 1px 2px rgba(20,24,31,.04);overflow:hidden}
+  .fig-head{padding:16px 22px 12px;border-bottom:1px solid var(--line);background:#fafbfc}
+  .fig-tag{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;
+           letter-spacing:.12em;color:#fff;background:var(--ink);padding:3px 9px;border-radius:4px}
+  .fig-title{font-family:var(--serif);font-size:21px;margin:9px 0 2px}
+  .fig-kicker{color:var(--muted);font-size:13.5px}
+  .svg-host{padding:18px 14px 4px;overflow-x:auto}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  figcaption{padding:16px 24px 24px;font-size:13.5px;color:#2b313c;border-top:1px dashed var(--line)}
+  figcaption b{color:var(--ink)}
+  figcaption .cap-lead{font-family:var(--serif);font-style:italic;font-size:14.5px;color:var(--ink);margin-bottom:8px}
+  figcaption code{font-family:var(--mono);font-size:12px;background:#f1f3f6;padding:1px 5px;border-radius:3px}
+  figcaption ol{margin:8px 0 0;padding-left:20px}
+  figcaption li{margin:5px 0}
+  .legend{display:flex;flex-wrap:wrap;gap:14px 26px;padding:14px 24px;background:#fafbfc;
+          border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+  .legend .k{display:inline-flex;align-items:center;gap:7px}
+  .sw{width:22px;height:13px;border-radius:3px;border:1px solid rgba(0,0,0,.15);display:inline-block}
+  .sw.dash{background:repeating-linear-gradient(90deg,#888 0 5px,transparent 5px 9px);border:none}
+  .warn{margin:34px 0 0;background:var(--red-bg);border:1px solid #f3c4bd;border-radius:9px;
+        padding:16px 20px;font-size:13.5px}
+  .warn h3{margin:0 0 6px;font-size:14px;color:var(--red);font-family:var(--mono);letter-spacing:.04em}
+  .warn ul{margin:6px 0 0;padding-left:18px}
+  /* svg text helpers via classes */
+  text{font-family:var(--sans);fill:var(--ink)}
+  .t-title{font-weight:700;font-size:14px}
+  .t-sub{font-size:11.5px;fill:var(--muted)}
+  .t-mono{font-family:var(--mono);font-size:11px}
+  .t-mono-s{font-family:var(--mono);font-size:10px;fill:var(--muted)}
+  .t-lane{font-family:var(--mono);font-weight:700;font-size:12px;letter-spacing:.08em}
+  @media print{body{background:#fff}figure{break-inside:avoid;box-shadow:none}.wrap{max-width:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>Instance-level Defect Detection — Algorithm Figures</h1>
+  <div class="sub">picknplace <code style="font-family:var(--mono);font-size:13px">detector</code> 브랜치 · <b>DINOv2 분류기와의 상호작용</b> 및 <b>클래스별 detector 내부 구조</b>의 논문용 시각화</div>
+  <div class="meta">SOURCE: src/defect/* , src/classifier/dinov2.py , src/pick_n_place.py · 기준 커밋 detector@091ea75 · 동반 문서 ALGORITHM_REPORT.md</div>
+</header>
+
+<!-- ============================== FIGURE 1 ============================== -->
+<figure>
+  <div class="fig-head">
+    <span class="fig-tag">FIGURE 1</span>
+    <div class="fig-title">결함 탐지 ⇄ DINOv2 분류기 상호작용 (system-level data flow)</div>
+    <div class="fig-kicker">하나의 backbone forward를 두 모듈이 layer를 나눠 공유 — 분류기는 <i>최종 layer</i>로 카테고리, detector는 <i>중간 layer</i>로 이상도</div>
+  </div>
+  <div class="svg-host">
+  <svg viewBox="0 0 1240 1080" role="img" aria-label="defect-classifier interaction">
+    <defs>
+      <marker id="ah" markerWidth="11" markerHeight="11" refX="8.5" refY="4" orient="auto">
+        <path d="M0,0 L9,4 L0,8 Z" fill="#3a4250"/>
+      </marker>
+      <marker id="ah-am" markerWidth="11" markerHeight="11" refX="8.5" refY="4" orient="auto">
+        <path d="M0,0 L9,4 L0,8 Z" fill="#b45309"/>
+      </marker>
+      <marker id="ah-in" markerWidth="11" markerHeight="11" refX="8.5" refY="4" orient="auto">
+        <path d="M0,0 L9,4 L0,8 Z" fill="#4338ca"/>
+      </marker>
+    </defs>
+
+    <!-- shared spine: input -> seg -> crop -> backbone -->
+    <!-- input -->
+    <rect x="470" y="18" width="300" height="48" rx="8" fill="var(--slate-bg)" stroke="var(--slate)"/>
+    <text class="t-title" x="620" y="40" text-anchor="middle">입력: RGB-D + normal map + ROI</text>
+    <text class="t-mono-s" x="620" y="57" text-anchor="middle">PickNPlace.run()</text>
+    <line x1="620" y1="66" x2="620" y2="92" stroke="#3a4250" marker-end="url(#ah)"/>
+
+    <!-- mask2former -->
+    <rect x="455" y="94" width="330" height="48" rx="8" fill="var(--slate-bg)" stroke="var(--slate)"/>
+    <text class="t-title" x="620" y="116" text-anchor="middle">① Mask2Former 분할 → instance masks</text>
+    <text class="t-mono-s" x="620" y="133" text-anchor="middle">detector.inference() → largest_component → polygon</text>
+    <line x1="620" y1="142" x2="620" y2="168" stroke="#3a4250" marker-end="url(#ah)"/>
+
+    <!-- shared crop (highlighted) -->
+    <rect x="445" y="170" width="350" height="62" rx="8" fill="#fff" stroke="var(--ink)" stroke-width="2"/>
+    <text class="t-lane" x="620" y="190" text-anchor="middle" fill="var(--ink)">SHARED CROP</text>
+    <text class="t-sub" x="620" y="207" text-anchor="middle">정사각 bbox · padding 3% · 배경 gray127 · mask-out</text>
+    <text class="t-mono-s" x="620" y="223" text-anchor="middle">resize 224 → 16×16 patch grid (분류기·detector 동일 규격)</text>
+    <line x1="620" y1="232" x2="620" y2="258" stroke="#3a4250" marker-end="url(#ah)"/>
+
+    <!-- DINOv2 backbone -->
+    <rect x="360" y="260" width="520" height="92" rx="10" fill="#f3f4f8" stroke="var(--slate)" stroke-width="1.5"/>
+    <text class="t-title" x="620" y="284" text-anchor="middle">DINOv2 backbone — 단일 forward</text>
+    <text class="t-mono-s" x="620" y="301" text-anchor="middle">(설계) 공유 forward output_hidden_states[0..N]</text>
+    <!-- two taps -->
+    <rect x="378" y="312" width="228" height="32" rx="6" fill="var(--amber-bg)" stroke="var(--amber)"/>
+    <text class="t-mono" x="492" y="332" text-anchor="middle" fill="var(--amber)">mid layer · hidden_states[L+1]</text>
+    <rect x="634" y="312" width="228" height="32" rx="6" fill="var(--indigo-bg)" stroke="var(--indigo)"/>
+    <text class="t-mono" x="748" y="332" text-anchor="middle" fill="var(--indigo)">final · last_hidden_state</text>
+
+    <!-- split arrows -->
+    <path d="M492,344 L492,372 L320,372 L320,402" fill="none" stroke="#b45309" stroke-width="1.6" marker-end="url(#ah-am)"/>
+    <path d="M748,344 L748,372 L912,372 L912,402" fill="none" stroke="#4338ca" stroke-width="1.6" marker-end="url(#ah-in)"/>
+
+    <!-- ===== DEFECT LANE (left) ===== -->
+    <text class="t-lane" x="320" y="392" text-anchor="middle" fill="var(--amber)">DEFECT BRANCH</text>
+    <rect x="150" y="404" width="340" height="56" rx="8" fill="var(--amber-bg)" stroke="var(--amber)"/>
+    <text class="t-title" x="320" y="426" text-anchor="middle">중간 layer patch tokens (n_q, D)</text>
+    <text class="t-sub" x="320" y="444" text-anchor="middle">crop_mask로 16×16 grid에서 객체 patch만 선택</text>
+
+    <!-- cache reuse dashed note -->
+    <path d="M606,328 C660,470 540,470 492,432" fill="none" stroke="#b45309" stroke-width="1.3" stroke-dasharray="5 4"/>
+    <text class="t-mono-s" x="640" y="455" fill="var(--amber)">↖ 캐시 재사용 시 추가 forward 0</text>
+    <text class="t-mono-s" x="640" y="470" fill="var(--muted)">(미스 시 detector 자체 forward fallback)</text>
+
+    <line x1="320" y1="460" x2="320" y2="556" stroke="#b45309" stroke-width="1.6" marker-end="url(#ah-am)"/>
+    <text class="t-mono-s" x="332" y="510">+ normal_map</text>
+    <text class="t-mono-s" x="332" y="525">+ mask</text>
+
+    <!-- ===== CLASSIFIER LANE (right) ===== -->
+    <text class="t-lane" x="912" y="392" text-anchor="middle" fill="var(--indigo)">CLASSIFIER BRANCH</text>
+    <rect x="752" y="404" width="336" height="52" rx="8" fill="var(--indigo-bg)" stroke="var(--indigo)"/>
+    <text class="t-title" x="920" y="425" text-anchor="middle">CLS(tok0) [+ patch-mean]</text>
+    <text class="t-sub" x="920" y="442" text-anchor="middle">기본 CLS-only (patch_mean_weight=0; config로 가산)</text>
+    <line x1="920" y1="456" x2="920" y2="478" stroke="#4338ca" stroke-width="1.4" marker-end="url(#ah-in)"/>
+
+    <rect x="752" y="480" width="336" height="46" rx="8" fill="var(--indigo-bg)" stroke="var(--indigo)"/>
+    <text class="t-title" x="920" y="500" text-anchor="middle">RGB ⊕ gray 융합 → L2 정규화</text>
+    <text class="t-sub" x="920" y="516" text-anchor="middle">rgb_weight·e_rgb + gray_weight·e_gray</text>
+    <line x1="920" y1="526" x2="920" y2="548" stroke="#4338ca" stroke-width="1.4" marker-end="url(#ah-in)"/>
+
+    <rect x="752" y="550" width="336" height="50" rx="8" fill="var(--indigo-bg)" stroke="var(--indigo)"/>
+    <text class="t-title" x="920" y="570" text-anchor="middle">cosine KNN vs reference bank</text>
+    <text class="t-sub" x="920" y="587" text-anchor="middle">top-k · softmax(sim/τ), τ=0.05 → label vote</text>
+    <line x1="920" y1="600" x2="920" y2="622" stroke="#4338ca" stroke-width="1.4" marker-end="url(#ah-in)"/>
+
+    <rect x="752" y="624" width="336" height="58" rx="8" fill="#fff" stroke="var(--indigo)" stroke-width="1.6"/>
+    <text class="t-title" x="920" y="645" text-anchor="middle">class_index  (+ similarity, vote_ratio, margin)</text>
+    <text class="t-sub" x="920" y="663" text-anchor="middle">unknown gate OR(min_score/sim/vote/margin) → id 5</text>
+
+    <!-- class_index routes to registry (cross arrow) -->
+    <path d="M752,653 L560,653 L560,592" fill="none" stroke="#4338ca" stroke-width="1.6" marker-end="url(#ah-in)"/>
+    <text class="t-mono-s" x="612" y="645" fill="var(--indigo)">class_index ⟶ 라우팅</text>
+
+    <!-- ===== REGISTRY + DETECTOR (center-left, converge) ===== -->
+    <rect x="150" y="558" width="420" height="48" rx="8" fill="#fff" stroke="var(--ink)" stroke-width="1.6"/>
+    <text class="t-title" x="360" y="579" text-anchor="middle">DefectRegistry.get(class_index)</text>
+    <text class="t-mono-s" x="360" y="596" text-anchor="middle">0→cascade · 1→fusion · 2,3→patchcore · 4 제외 · 5 우회</text>
+    <line x1="360" y1="606" x2="360" y2="632" stroke="#3a4250" marker-end="url(#ah)"/>
+
+    <rect x="150" y="634" width="420" height="54" rx="8" fill="var(--amber-bg)" stroke="var(--amber)" stroke-width="1.4"/>
+    <text class="t-title" x="360" y="655" text-anchor="middle">detector.score(rgb, mask, normal, dinov2_features)</text>
+    <text class="t-sub" x="360" y="673" text-anchor="middle">클래스 전용 전략 실행 (Figure 2 참조)</text>
+    <line x1="360" y1="688" x2="360" y2="714" stroke="#3a4250" marker-end="url(#ah)"/>
+
+    <rect x="150" y="716" width="420" height="56" rx="8" fill="#fff" stroke="var(--ink)" stroke-width="1.6"/>
+    <text class="t-title" x="360" y="738" text-anchor="middle">DefectResult</text>
+    <text class="t-mono-s" x="360" y="756" text-anchor="middle">score · is_defect · score_map · votes · components</text>
+
+    <!-- feedback to priority -->
+    <path d="M360,772 L360,812 L620,812 L620,838" fill="none" stroke="#3a4250" stroke-width="1.6" marker-end="url(#ah)"/>
+    <rect x="430" y="840" width="380" height="56" rx="8" fill="var(--slate-bg)" stroke="var(--slate)"/>
+    <text class="t-title" x="620" y="862" text-anchor="middle">④⑥ 파지 우선순위 / 정렬 피드백</text>
+    <text class="t-sub" x="620" y="880" text-anchor="middle">action: reject(배제) · priority_down(감점) · report_only(기록)</text>
+
+    <!-- layer ownership callout -->
+    <rect x="828" y="724" width="372" height="150" rx="9" fill="#fbfcfe" stroke="var(--line)"/>
+    <text class="t-lane" x="844" y="746" fill="var(--ink)">LAYER OWNERSHIP</text>
+    <text class="t-sub" x="844" y="767">분류기 = 최종 layer (semantic 카테고리)</text>
+    <text class="t-sub" x="844" y="785">detector = 중간 layer (국소 표면 이상)</text>
+    <text class="t-sub" x="844" y="803">→ 같은 crop·forward, 다른 layer = 상보적</text>
+    <text class="t-mono-s" x="844" y="824" fill="var(--muted)">base: 분류기 L12 / detector L5–8</text>
+    <text class="t-mono-s" x="844" y="840" fill="var(--muted)">large(예측): 분류기 L24 / detector L10–16</text>
+    <text class="t-mono-s" x="844" y="858" fill="var(--red)">∴ ablation에서 최종 layer 제외</text>
+
+    <!-- not-wired stamp -->
+    <rect x="40" y="788" width="92" height="74" rx="8" fill="var(--red-bg)" stroke="var(--red)" stroke-dasharray="5 4"/>
+    <text class="t-mono" x="86" y="812" text-anchor="middle" fill="var(--red)">설계됨</text>
+    <text class="t-mono" x="86" y="828" text-anchor="middle" fill="var(--red)">미배선</text>
+    <text class="t-mono-s" x="86" y="848" text-anchor="middle" fill="var(--red)">(pick_n_</text>
+    <text class="t-mono-s" x="86" y="860" text-anchor="middle" fill="var(--red)">place)</text>
+  </svg>
+  </div>
+  <div class="legend">
+    <span class="k"><span class="sw" style="background:var(--slate-bg);border-color:var(--slate)"></span>공유 파이프라인</span>
+    <span class="k"><span class="sw" style="background:var(--indigo-bg);border-color:var(--indigo)"></span>분류기 경로</span>
+    <span class="k"><span class="sw" style="background:var(--amber-bg);border-color:var(--amber)"></span>결함 탐지 경로</span>
+    <span class="k"><span class="sw dash"></span>캐시 재사용 / 미배선(설계)</span>
+  </div>
+  <figcaption>
+    <div class="cap-lead">Figure 1. 분류와 결함 탐지는 동일 crop·동일 backbone forward를 공유하되, 서로 다른 DINOv2 layer를 소비하여 상보적으로 작동한다.</div>
+    <ol>
+      <li><b>공유 substrate</b>: ① 분할 → 인스턴스 crop은 <code>정사각·pad 3%·bg127·mask-out</code> 규격으로 분류기와 detector가 동일하게 만든다. 따라서 backbone forward 1회로 두 모듈 입력이 동시에 준비된다.</li>
+      <li><b>layer 분기</b>: <code>final(last_hidden_state)</code>은 분류기가 CLS+patch-mean 전역 임베딩으로 카테고리(<code>class_index</code>)를 판정하는 데 쓴다. <code>mid(hidden_states[L+1])</code>은 detector가 국소 patch L2 거리로 이상도를 잰다. 최종 layer는 semantic이라 "정상 vs 결함"이 같은 카테고리로 수렴 → 이상 신호 소실 → ablation에서 제외.</li>
+      <li><b>라우팅</b>: 분류기의 <code>class_index</code>가 <code>DefectRegistry.get()</code>으로 들어가 클래스 전용 detector를 선택한다. bottle(4)은 투명 plastic로 제외, unknown(5)은 우회.</li>
+      <li><b>피드백 (설계 예정, 미배선)</b>: detector의 <code>action</code> 속성(reject/priority_down/report_only — <i>DefectResult 필드가 아니라 detector 클래스 속성</i>)을 파지 우선순위·정렬에 반영하도록 <i>설계</i>되어 있다. 단 현재 <code>pick_n_place.run()</code>·<code>priority_scorer</code> 어디에도 action/defect를 소비하는 코드가 없으며, 실제 인스턴스에 부착되는 피드백은 <code>priority_score</code>의 13개 <code>grasp_*</code> 속성뿐이다.</li>
+      <li><b>정직성</b>: 점선 박스가 표시하듯 (a) feature 캐시 재사용은 <i>설계된</i> 0-forward 경로이며 현재 분류기가 중간 layer를 노출하지 않아 detector가 자체 forward로 fallback하고, (b) 이 통합 자체가 아직 <code>pick_n_place.py</code>에 배선되지 않았다.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<!-- ============================== FIGURE 2 ============================== -->
+<figure>
+  <div class="fig-head">
+    <span class="fig-tag">FIGURE 2</span>
+    <div class="fig-title">클래스별 detector 내부 구조 (deep dissection)</div>
+    <div class="fig-kicker">하나의 인터페이스(<code>DefectDetector.score</code>) 아래 세 전략 — 단일 신호 / 4신호 voting / 가중 융합 — 과 이를 떠받치는 오프라인 캘리브레이션</div>
+  </div>
+  <div class="svg-host">
+  <svg viewBox="0 0 1240 1240" role="img" aria-label="per-class detector internals">
+    <defs>
+      <marker id="b-ah" markerWidth="10" markerHeight="10" refX="8" refY="3.6" orient="auto">
+        <path d="M0,0 L8,3.6 L0,7.2 Z" fill="#3a4250"/>
+      </marker>
+      <marker id="b-green" markerWidth="10" markerHeight="10" refX="8" refY="3.6" orient="auto">
+        <path d="M0,0 L8,3.6 L0,7.2 Z" fill="#047857"/>
+      </marker>
+    </defs>
+
+    <!-- ABC interface header -->
+    <rect x="300" y="16" width="640" height="62" rx="10" fill="#fff" stroke="var(--ink)" stroke-width="2"/>
+    <text class="t-title" x="620" y="40" text-anchor="middle">interface  DefectDetector.score(rgb_bgr, mask, normal_map, dinov2_features)</text>
+    <text class="t-mono-s" x="620" y="60" text-anchor="middle">→ DefectResult(score, is_defect, score_map, votes, components)   ·   attrs: threshold · action · enabled</text>
+
+    <!-- three split lines -->
+    <path d="M620,78 L620,96 L210,96 L210,118" fill="none" stroke="#3a4250" marker-end="url(#b-ah)"/>
+    <path d="M620,78 L620,108 L620,118" fill="none" stroke="#3a4250" marker-end="url(#b-ah)"/>
+    <path d="M620,78 L620,96 L1030,96 L1030,118" fill="none" stroke="#3a4250" marker-end="url(#b-ah)"/>
+
+    <!-- ===== COLUMN A: PatchCore-lite ===== -->
+    <g>
+      <rect x="40" y="120" width="350" height="34" rx="7" fill="var(--ink)"/>
+      <text class="t-lane" x="215" y="142" text-anchor="middle" fill="#fff">A · PATCHCORE-LITE</text>
+      <text class="t-mono-s" x="215" y="170" text-anchor="middle">rigid: pencil_case(L5) · metal_case(L7)</text>
+
+      <rect x="40" y="180" width="350" height="44" rx="7" fill="var(--slate-bg)" stroke="var(--slate)"/>
+      <text class="t-sub" x="215" y="198" text-anchor="middle">crop → DINOv2 L → patch tokens</text>
+      <text class="t-mono-s" x="215" y="214" text-anchor="middle">mask-select → test_patches (n_q, D)</text>
+      <line x1="215" y1="224" x2="215" y2="244" stroke="#3a4250" marker-end="url(#b-ah)"/>
+
+      <rect x="40" y="246" width="350" height="62" rx="7" fill="#fff" stroke="var(--slate)"/>
+      <text class="t-title" x="215" y="266" text-anchor="middle">L2 최근접 거리</text>
+      <text class="t-mono" x="215" y="285" text-anchor="middle">d²=‖q‖²+‖m‖²−2·qmᵀ  (clamp≥0,√)</text>
+      <text class="t-mono-s" x="215" y="300" text-anchor="middle">nn_dist(q)=min_m d(q,m)</text>
+      <line x1="215" y1="308" x2="215" y2="328" stroke="#3a4250" marker-end="url(#b-ah)"/>
+
+      <rect x="40" y="330" width="350" height="58" rx="7" fill="#fff" stroke="var(--slate)"/>
+      <text class="t-title" x="215" y="350" text-anchor="middle">aggregate → score</text>
+      <text class="t-mono-s" x="215" y="368" text-anchor="middle">max | top_k_mean(k=4) | else→top_p(default)</text>
+      <text class="t-mono-s" x="215" y="382" text-anchor="middle">현행 config = max (pencil·metal·mango)</text>
+      <line x1="215" y1="388" x2="215" y2="408" stroke="#3a4250" marker-end="url(#b-ah)"/>
+
+      <rect x="40" y="410" width="350" height="44" rx="7" fill="var(--amber-bg)" stroke="var(--amber)"/>
+      <text class="t-title" x="215" y="430" text-anchor="middle">is_defect = score &gt; τ</text>
+      <text class="t-mono-s" x="215" y="446" text-anchor="middle">score_map = scatter(nn_dist)→(W,H)</text>
+    </g>
+
+    <!-- ===== COLUMN B: Cascade ===== -->
+    <g>
+      <rect x="440" y="120" width="360" height="34" rx="7" fill="var(--ink)"/>
+      <text class="t-lane" x="620" y="142" text-anchor="middle" fill="#fff">B · CASCADE (voting)</text>
+      <text class="t-mono-s" x="620" y="170" text-anchor="middle">deformable: haribo(L5) — 정상 구겨짐 ≠ 찢김</text>
+
+      <!-- 4 signal nodes -->
+      <rect x="440" y="180" width="174" height="58" rx="7" fill="#fff" stroke="var(--slate)"/>
+      <text class="t-mono" x="527" y="199" text-anchor="middle">s1 PatchCore</text>
+      <text class="t-mono-s" x="527" y="215" text-anchor="middle">L2 score</text>
+      <text class="t-mono-s" x="527" y="230" text-anchor="middle">&gt; 8.6 ?</text>
+
+      <rect x="626" y="180" width="174" height="58" rx="7" fill="#fff" stroke="var(--slate)"/>
+      <text class="t-mono" x="713" y="199" text-anchor="middle">s2 Color</text>
+      <text class="t-mono-s" x="713" y="215" text-anchor="middle">Mahal&gt;z(cfg3.0) ratio</text>
+      <text class="t-mono-s" x="713" y="230" text-anchor="middle">&gt; 0.10 ?</text>
+
+      <rect x="440" y="244" width="174" height="58" rx="7" fill="#fff" stroke="var(--slate)"/>
+      <text class="t-mono" x="527" y="263" text-anchor="middle">s3 Normal Lap.</text>
+      <text class="t-mono-s" x="527" y="279" text-anchor="middle">|∇²n_z| peak ratio</text>
+      <text class="t-mono-s" x="527" y="294" text-anchor="middle">&gt; 0.05 ?</text>
+
+      <rect x="626" y="244" width="174" height="58" rx="7" fill="#fff" stroke="var(--slate)"/>
+      <text class="t-mono" x="713" y="263" text-anchor="middle">s4 Topology</text>
+      <text class="t-mono-s" x="713" y="279" text-anchor="middle">P²/(4πA)</text>
+      <text class="t-mono-s" x="713" y="294" text-anchor="middle">&gt; 1.8 ?</text>
+
+      <path d="M527,302 L527,318 L620,318 L620,330" fill="none" stroke="#3a4250" marker-end="url(#b-ah)"/>
+      <path d="M713,302 L713,318 L620,318" fill="none" stroke="#3a4250"/>
+
+      <rect x="470" y="332" width="300" height="56" rx="7" fill="#fff" stroke="var(--ink)" stroke-width="1.6"/>
+      <text class="t-title" x="620" y="352" text-anchor="middle">다수결 voting (≥2 of 4)</text>
+      <text class="t-mono" x="620" y="371" text-anchor="middle">votes = Σ 𝟙[sᵢ &gt; τᵢ]</text>
+      <text class="t-mono-s" x="620" y="384" text-anchor="middle">정상 구겨짐=1표 · 찢김=다신호 동시</text>
+      <line x1="620" y1="388" x2="620" y2="408" stroke="#3a4250" marker-end="url(#b-ah)"/>
+
+      <rect x="470" y="410" width="300" height="44" rx="7" fill="var(--amber-bg)" stroke="var(--amber)"/>
+      <text class="t-title" x="620" y="430" text-anchor="middle">is_defect = votes ≥ 2</text>
+      <text class="t-mono-s" x="620" y="446" text-anchor="middle">score = max(s1..s4)</text>
+    </g>
+
+    <!-- ===== COLUMN C: Fusion ===== -->
+    <g>
+      <rect x="850" y="120" width="350" height="34" rx="7" fill="var(--ink)"/>
+      <text class="t-lane" x="1025" y="142" text-anchor="middle" fill="#fff">C · WEIGHTED FUSION</text>
+      <text class="t-mono-s" x="1025" y="170" text-anchor="middle">mango(L8) — rigid급 + 찢김 기하 보조</text>
+
+      <rect x="850" y="180" width="168" height="64" rx="7" fill="#fff" stroke="var(--slate)"/>
+      <text class="t-mono" x="934" y="200" text-anchor="middle">z_pc</text>
+      <text class="t-mono-s" x="934" y="216" text-anchor="middle">(pc−μ)/σ</text>
+      <text class="t-mono-s" x="934" y="231" text-anchor="middle">μ7.95 σ1.18 (max agg)</text>
+
+      <rect x="1032" y="180" width="168" height="64" rx="7" fill="#fff" stroke="var(--slate)"/>
+      <text class="t-mono" x="1116" y="200" text-anchor="middle">z_lap</text>
+      <text class="t-mono-s" x="1116" y="216" text-anchor="middle">|∇²n_z|&gt;0.30(cfg;코드0.15) ratio</text>
+      <text class="t-mono-s" x="1116" y="231" text-anchor="middle">erode7 · normal없으면 z_pc만</text>
+
+      <path d="M934,244 L934,262 L1025,262 L1025,276" fill="none" stroke="#3a4250" marker-end="url(#b-ah)"/>
+      <path d="M1116,244 L1116,262 L1025,262" fill="none" stroke="#3a4250"/>
+
+      <rect x="858" y="278" width="334" height="60" rx="7" fill="#fff" stroke="var(--ink)" stroke-width="1.6"/>
+      <text class="t-title" x="1025" y="299" text-anchor="middle">가중 융합</text>
+      <text class="t-mono" x="1025" y="318" text-anchor="middle">fused=(1−w)·z_pc + w·z_lap</text>
+      <text class="t-mono-s" x="1025" y="332" text-anchor="middle">w=lap_weight=0.25 (PC=1−w=0.75; 미최적화)</text>
+      <line x1="1025" y1="338" x2="1025" y2="358" stroke="#3a4250" marker-end="url(#b-ah)"/>
+
+      <rect x="858" y="360" width="334" height="42" rx="7" fill="var(--amber-bg)" stroke="var(--amber)"/>
+      <text class="t-title" x="1025" y="386" text-anchor="middle">is_defect = fused &gt; 1.8</text>
+
+      <rect x="858" y="408" width="334" height="46" rx="7" fill="var(--red-bg)" stroke="var(--red)" stroke-dasharray="5 4"/>
+      <text class="t-mono-s" x="1025" y="427" text-anchor="middle" fill="var(--red)">Laplacian TPR 합성검증 불가 → enabled:false</text>
+      <text class="t-mono-s" x="1025" y="443" text-anchor="middle" fill="var(--red)">실물 찢김 테스트 후 전환</text>
+    </g>
+
+    <!-- divider -->
+    <line x1="60" y1="486" x2="1180" y2="486" stroke="var(--line)" stroke-dasharray="3 4"/>
+    <text class="t-lane" x="60" y="506" fill="var(--green)">OFFLINE CALIBRATION  (정상 데이터로 사전 산출 → 위 detector에 주입)</text>
+
+    <!-- calibration boxes -->
+    <rect x="60" y="520" width="250" height="78" rx="8" fill="var(--green-bg)" stroke="var(--green)"/>
+    <text class="t-title" x="185" y="542" text-anchor="middle">Memory bank build</text>
+    <text class="t-mono-s" x="185" y="560" text-anchor="middle">build_patchcore_refs.py --layer</text>
+    <text class="t-mono-s" x="185" y="575" text-anchor="middle">정상 patch 누적 → .npz</text>
+    <text class="t-mono-s" x="185" y="590" text-anchor="middle">메타: dinov2_layer (가드 기준)</text>
+
+    <rect x="330" y="520" width="250" height="78" rx="8" fill="var(--green-bg)" stroke="var(--green)"/>
+    <text class="t-title" x="455" y="542" text-anchor="middle">Color GMM prior</text>
+    <text class="t-mono-s" x="455" y="560" text-anchor="middle">LAB 3-comp GMM, Mahalanobis</text>
+    <text class="t-mono-s" x="455" y="575" text-anchor="middle">→ color_gmm_*.npz (s2 전용)</text>
+    <text class="t-mono-s" x="455" y="590" text-anchor="middle">layer 무관 (재빌드 불필요)</text>
+
+    <rect x="600" y="520" width="270" height="78" rx="8" fill="var(--green-bg)" stroke="var(--green)"/>
+    <text class="t-title" x="735" y="542" text-anchor="middle">Threshold tuning (LOO ROC)</text>
+    <text class="t-mono-s" x="735" y="560" text-anchor="middle">synth_roc_tune_loo.py (layer-aware)</text>
+    <text class="t-mono-s" x="735" y="575" text-anchor="middle">정상 LOO vs 합성 → balanced TPR·spec τ</text>
+    <text class="t-mono-s" x="735" y="590" text-anchor="middle">scratch(rigid) / tear(deformable)</text>
+
+    <rect x="890" y="520" width="290" height="78" rx="8" fill="var(--green-bg)" stroke="var(--green)"/>
+    <text class="t-title" x="1035" y="542" text-anchor="middle">Layer ablation</text>
+    <text class="t-mono-s" x="1035" y="560" text-anchor="middle">layer_ablation_*.py · L1..N AUROC</text>
+    <text class="t-mono-s" x="1035" y="575" text-anchor="middle">best: metalL7 pencilL5 hariboL5 mangoL8</text>
+    <text class="t-mono-s" x="1035" y="590" text-anchor="middle">→ config dinov2_layer</text>
+
+    <!-- injection arrows up -->
+    <path d="M185,520 L185,500 L215,500 L215,456" fill="none" stroke="#047857" stroke-width="1.4" marker-end="url(#b-green)"/>
+    <path d="M455,520 L455,505 L527,505 L527,302" fill="none" stroke="#047857" stroke-width="1.2" marker-end="url(#b-green)"/>
+    <path d="M735,520 L735,470 L620,470 L620,454" fill="none" stroke="#047857" stroke-width="1.4" marker-end="url(#b-green)"/>
+    <path d="M1035,520 L1035,505 L1025,505 L1025,454" fill="none" stroke="#047857" stroke-width="1.4" marker-end="url(#b-green)"/>
+
+    <!-- routing table -->
+    <text class="t-lane" x="60" y="648" fill="var(--ink)">REGISTRY ROUTING  (configs/defect_detection.yaml)</text>
+    <g font-family="var(--mono)" font-size="12">
+      <!-- header -->
+      <rect x="60" y="660" width="1120" height="30" fill="#eef1f5" stroke="var(--line)"/>
+      <text x="78" y="680" font-weight="700">id</text>
+      <text x="150" y="680" font-weight="700">class</text>
+      <text x="320" y="680" font-weight="700">type</text>
+      <text x="470" y="680" font-weight="700">layer</text>
+      <text x="560" y="680" font-weight="700">τ</text>
+      <text x="660" y="680" font-weight="700">enabled</text>
+      <text x="790" y="680" font-weight="700">AUROC</text>
+      <text x="900" y="680" font-weight="700">비고</text>
+
+      <rect x="60" y="690" width="1120" height="28" fill="#fff" stroke="var(--line)"/>
+      <text x="78" y="709">0</text><text x="150" y="709">haribo</text><text x="320" y="709">cascade</text><text x="470" y="709" fill="#b45309">L5*</text><text x="560" y="709">8.6</text><text x="660" y="709" fill="#047857">✅</text><text x="790" y="709">.93(L5 .94)</text><text x="900" y="709" fill="#5b6472">≥2/4 다수결</text>
+
+      <rect x="60" y="718" width="1120" height="28" fill="#fafbfc" stroke="var(--line)"/>
+      <text x="78" y="737">1</text><text x="150" y="737">mango</text><text x="320" y="737">fusion</text><text x="470" y="737">L8</text><text x="560" y="737">1.8</text><text x="660" y="737" fill="#c0392b">❌</text><text x="790" y="737">.70→.88</text><text x="900" y="737" fill="#5b6472">=PCmax단독·융합미측정·검증대기</text>
+
+      <rect x="60" y="746" width="1120" height="28" fill="#fff" stroke="var(--line)"/>
+      <text x="78" y="765">2</text><text x="150" y="765">pencil_case</text><text x="320" y="765">patchcore</text><text x="470" y="765" fill="#b45309">L5*</text><text x="560" y="765">9.2</text><text x="660" y="765" fill="#047857">✅</text><text x="790" y="765">.986</text><text x="900" y="765" fill="#5b6472">max agg</text>
+
+      <rect x="60" y="774" width="1120" height="28" fill="#fafbfc" stroke="var(--line)"/>
+      <text x="78" y="793">3</text><text x="150" y="793">metal_case</text><text x="320" y="793">patchcore</text><text x="470" y="793" fill="#b45309">L7*</text><text x="560" y="793">6.0</text><text x="660" y="793" fill="#047857">✅</text><text x="790" y="793">.998</text><text x="900" y="793" fill="#5b6472">SEPARATED</text>
+
+      <rect x="60" y="802" width="1120" height="28" fill="#fff" stroke="var(--line)"/>
+      <text x="78" y="821">4</text><text x="150" y="821">bottle</text><text x="320" y="821" fill="#c0392b">— 제외</text><text x="470" y="821">—</text><text x="560" y="821">—</text><text x="660" y="821">—</text><text x="790" y="821">—</text><text x="900" y="821" fill="#5b6472">투명→patch 혼입</text>
+
+      <rect x="60" y="830" width="1120" height="28" fill="#fafbfc" stroke="var(--line)"/>
+      <text x="78" y="849">5</text><text x="150" y="849">unknown</text><text x="320" y="849" fill="#c0392b">— 우회</text><text x="470" y="849">—</text><text x="560" y="849">—</text><text x="660" y="849">—</text><text x="790" y="849">—</text><text x="900" y="849" fill="#5b6472">분류기가 거름</text>
+    </g>
+    <text class="t-mono-s" x="60" y="878" fill="var(--amber)">* layer/τ는 staged — bank 재빌드+재튜닝 전까지 가드 차단 (현재 bank는 L8)</text>
+    <text class="t-mono-s" x="60" y="894" fill="var(--muted)">τ·통계(8.6/0.10/0.05/1.8/z3.0/μσ/0.30)는 defect_detection.yaml 주입값 — 코드 상수 아님</text>
+  </svg>
+  </div>
+  <div class="legend">
+    <span class="k"><span class="sw" style="background:#15181f;border:none"></span>인터페이스/판정</span>
+    <span class="k"><span class="sw" style="background:var(--slate-bg);border-color:var(--slate)"></span>연산 노드</span>
+    <span class="k"><span class="sw" style="background:var(--amber-bg);border-color:var(--amber)"></span>is_defect 출력</span>
+    <span class="k"><span class="sw" style="background:var(--green-bg);border-color:var(--green)"></span>오프라인 캘리브레이션</span>
+    <span class="k"><span class="sw dash"></span>미검증/staged</span>
+  </div>
+  <figcaption>
+    <div class="cap-lead">Figure 2. 세 전략은 객체 물성에 맞춰 신호 수를 달리한다 — rigid는 단일 신호로 충분, deformable은 다신호 voting으로 정상 변형과 결함을 분리, mango는 거리+기하의 가중 융합.</div>
+    <ol>
+      <li><b>A · PatchCore-lite</b>: 정상 patch memory bank와의 최근접 L2 거리를 집계한 단일 신호. rigid 객체(metal/pencil)는 정상 표면 manifold가 좁아 이 단일 신호로 AUROC 0.99+. aggregate는 <code>top_k_mean</code>(rigid, 단일 outlier 완화)과 <code>max</code>(소형 결함 민감) 중 클래스별 선택.</li>
+      <li><b>B · Cascade</b>: 정상 구겨짐과 찢김이 모두 표면을 바꾸는 deformable(haribo) 문제를 4신호 <b>다수결 voting(≥2 of 4, voting_min=2)</b>으로 해결. (코드 주석의 "AND gate"는 부울 의미상 오기 — 실제는 임계 충족 신호 수 ≥2.) 정상 구겨짐은 PatchCore 1표에 그치지만, 찢김은 색(s2)·기하(s3)·형상(s4)이 동시에 떠 다수결을 넘는다. <code>score=max(s1..s4)</code>는 로깅용이고 판정엔 미사용(판정은 전적으로 votes). 임계 8.6/0.10/0.05/1.8은 모두 yaml 주입값.</li>
+      <li><b>C · Weighted Fusion</b>: mango는 정상이 rigid급으로 타이트해 PatchCore가 주신호((1−w)=0.75)이고, 찢김의 normal 불연속을 보조(w=lap_weight=0.25)로 z-가중 융합한다(yaml 키는 lap_weight=0.25만, 0.75는 유도값). 단 합성 결함이 RGB만 바꿔 <b>Laplacian 채널 TPR은 오프라인 검증 불가</b>이고, 현 config <code>lap_mu=0/σ=1</code>이라 z_lap=raw ratio라 실효 lap 기여도 작다 → <code>enabled:false</code> 실물 검증 대기.</li>
+      <li><b>오프라인 캘리브레이션(녹색)</b>: 모든 detector는 정상 데이터 산출물에 의존한다 — memory bank(patch 거리 기준), color GMM(s2, <i>layer 무관</i>), LOO ROC 임계(F1-best τ), layer ablation(클래스별 best layer). 이들이 위 online detector에 주입된다.</li>
+      <li><b>라우팅 테이블</b>: <code>class_index</code> → detector 매핑과 운영점. <code>*</code> 표시 layer/τ는 ablation 결론을 config에 반영한 staged 값으로, bank 재빌드+재튜닝 전까지 PatchCoreLite 가드가 로드를 차단한다(현재 bank는 L8).</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="warn">
+  <h3>FIGURE NOTES — 발표 시 정확성 유의</h3>
+  <ul>
+    <li>두 그림의 <b>점선/빨강</b> 요소는 "현재 동작"이 아니라 <b>설계됨·미검증·staged</b> 상태다. (캐시 재사용·pick_n_place 배선·mango fusion·layer 전환)</li>
+    <li>layer 번호(L5/L7/L8)는 <b>dinov2-base</b> 기준이다. large(24 block) 전환 시 전부 재-ablation 필요(이론 예측 밴드 L10–16).</li>
+    <li>수치(AUROC·τ·μ/σ)는 base·합성결함·LOO 기준 산출값으로, 실물 로봇 테스트 false rate로 재검증 대상이다.</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>
