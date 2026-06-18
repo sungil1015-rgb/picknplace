@@ -42,15 +42,20 @@
 enabled: true
 
 detectors:
-  # 0: haribo (LOO CV=0.191, ROC AUROC=0.929, F1-best τ=8.59)
+  # 0: haribo (LOO CV=0.191, ROC AUROC=0.929@L8, F1-best τ=8.59@L8)
+  #    layer ablation 클래스별 best: L5 (AUROC 0.942, L7 0.941과 거의 동급).
+  #    ⚠ STAGED: dinov2_layer=5로 변경했으나 weights/patchcore_haribo.npz는 아직 L8.
+  #       서버 복구 후 `build_patchcore_refs.py --class_id 1 --class_name haribo --layer 5`로
+  #       재빌드 + LOO ROC로 patchcore.threshold 재튜닝 전까지 PatchCoreLite 로드 시 에러로 멈춤.
   0:
     type: cascade
     enabled: true
+    dinov2_layer: 5            # was 8 (ablation best). 뱅크 재빌드 전까지 비활성(에러)
     memory_bank: weights/patchcore_haribo.npz
     color_prior: weights/color_gmm_haribo.npz
     signals:
       patchcore:
-        threshold: 8.6
+        threshold: 8.6         # TODO: L5 재튜닝 필요 — 현재값은 L8 기준이라 무효
       color:
         z_threshold: 3.0
         outlier_ratio_threshold: 0.10
@@ -80,27 +85,35 @@ detectors:
     lap_mu: 0.0         # 실측 normal map 통계로 갱신 예정 (로봇 테스트 warm-up)
     lap_sigma: 1.0
     lap_erosion_px: 7
-    dinov2_layer: 8
+    dinov2_layer: 8            # ablation 클래스별 best (단일 L8=0.870; L4+L8+L11 결합 0.888은 단일-layer detector 미지원). 유지
     patch_aggregate: max       # top_k는 mango에서 AUROC 하락 (0.816 vs 0.880) — 소형 tear 신호 희석
     action: reject
 
-  # 2: pencil_case (LOO CV=0.354 outlier 4개 비닐 영향, ROC AUROC=0.986, F1-best τ=9.12)
+  # 2: pencil_case (LOO CV=0.354 outlier 4개 비닐 영향, ROC AUROC=0.986@L8, F1-best τ=9.12@L8)
+  #    layer ablation 클래스별 best: L5 (AUROC 0.996, L11과 공동 1위).
+  #    ⚠ STAGED: dinov2_layer=5로 변경. weights/patchcore_pencil_case.npz는 아직 L8 →
+  #       `build_patchcore_refs.py --class_id <pencil cid> --class_name pencil_case --layer 5` 재빌드 +
+  #       threshold 재튜닝 전까지 로드 에러로 멈춤.
   2:
     type: patchcore
     enabled: true
     memory_bank: weights/patchcore_pencil_case.npz
-    threshold: 9.2
-    dinov2_layer: 8
+    threshold: 9.2            # TODO: L5 재튜닝 필요 — 현재값은 L8 기준이라 무효
+    dinov2_layer: 5           # was 8 (ablation best)
     patch_aggregate: max
     action: reject
 
-  # 3: metal_case (LOO CV=0.112, ROC AUROC=0.998, F1-best τ=8.93. 가장 강력)
+  # 3: metal_case (LOO CV=0.112, ROC AUROC=0.998@L8, F1-best τ=8.93@L8. 가장 강력)
+  #    layer ablation 클래스별 best: L7 (AUROC 0.999, 유일하게 SEPARATED, FPR 4%→1%).
+  #    report 참고 τ: L7 F1-best 5.76 → 보수적 절상 6.0 (재빌드 후 실측 재확인 필요).
+  #    ⚠ STAGED: weights/patchcore_metal_case.npz는 아직 L8 →
+  #       `build_patchcore_refs.py --class_id 4 --class_name metal_case --layer 7` 재빌드 전까지 로드 에러.
   3:
     type: patchcore
     enabled: true
     memory_bank: weights/patchcore_metal_case.npz
-    threshold: 9.0
-    dinov2_layer: 8
+    threshold: 6.0           # L7 참고 τ(5.76) 보수 절상. TODO: 재빌드 후 LOO 재확인
+    dinov2_layer: 7          # was 8 (ablation best, SEPARATED)
     patch_aggregate: max
     action: reject
 

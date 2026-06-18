@@ -41,7 +41,18 @@ class PatchCoreLite(DefectDetector):
 
         data = np.load(self.memory_bank_path)
         self.memory_bank_np = data["memory_bank"].astype(np.float32)   # (N, D)
-        self.layer = int(data["dinov2_layer"]) if "dinov2_layer" in data else dinov2_layer
+        # layer는 config(dinov2_layer)가 source of truth. 단 메모리뱅크가 다른 layer로
+        # 빌드돼 있으면 테스트 patch(L_config) vs 뱅크 벡터(L_bank) 비교가 무의미해지므로
+        # 불일치 시 즉시 에러 (조용히 틀린 결과 방지). 뱅크에 layer 메타 없으면 config 신뢰(legacy).
+        bank_layer = int(data["dinov2_layer"]) if "dinov2_layer" in data else None
+        if bank_layer is not None and bank_layer != int(dinov2_layer):
+            raise ValueError(
+                f"layer mismatch: config는 L{dinov2_layer}를 요청했으나 memory bank "
+                f"'{self.memory_bank_path.name}'는 L{bank_layer}로 빌드됨. "
+                f"L{dinov2_layer}로 재빌드하거나(scripts/build_patchcore_refs.py --layer {dinov2_layer}) "
+                f"config dinov2_layer를 {bank_layer}로 되돌리세요."
+            )
+        self.layer = int(dinov2_layer)
         self.input_size = int(data["input_size"]) if "input_size" in data else input_size
         self.grid_size = self.input_size // 14
 

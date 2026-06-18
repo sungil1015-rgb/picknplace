@@ -1,8 +1,13 @@
 """PatchCore-lite memory bank 빌드 — 라벨링 polygon 데이터에서 객체별로 DinoV2 mid-layer patch features 추출.
 
 Usage:
-    CUDA_VISIBLE_DEVICES=0 python scripts/build_patchcore_refs.py --class_id 3 --class_name metal_case
-    CUDA_VISIBLE_DEVICES=0 python scripts/build_patchcore_refs.py --class_id 5 --class_name pencil_case
+    CUDA_VISIBLE_DEVICES=0 python scripts/build_patchcore_refs.py --class_id 3 --class_name metal_case --layer 7
+    CUDA_VISIBLE_DEVICES=0 python scripts/build_patchcore_refs.py --class_id 5 --class_name pencil_case --layer 5
+
+layer ablation (notes/LAYER_ABLATION_REPORT.md) 클래스별 best:
+    haribo=5, pencil_case=5, metal_case=7, mango=8.
+--layer 미지정 시 DINOV2_LAYER (8) 기본. config(defect_detection.yaml)의 dinov2_layer와
+반드시 일치시켜야 함 — 불일치 시 PatchCoreLite 로드에서 에러.
 """
 from __future__ import annotations
 
@@ -21,7 +26,7 @@ sys.path.insert(0, str(ROOT))
 
 CROP_PADDING_RATIO = 0.03
 CROP_BACKGROUND = 127
-DINOV2_LAYER = 8  # mid-layer (0-indexed, 12 transformer blocks 중 8번째 block 출력)
+DINOV2_LAYER = 8  # 기본 mid-layer (--layer로 클래스별 override). 0-indexed, 12 blocks 중 8번째 출력
 INPUT_SIZE = 224
 GRID_SIZE = INPUT_SIZE // 14  # ViT patch size 14 → 16x16 grid
 
@@ -76,7 +81,7 @@ def crop_with_mask_alpha(image: np.ndarray, mask: np.ndarray, padding_ratio: flo
     return crop, crop_mask
 
 
-def extract_patch_features(crop_bgr, crop_mask, processor, model, device):
+def extract_patch_features(crop_bgr, crop_mask, processor, model, device, layer=DINOV2_LAYER):
     """DinoV2 forward (RGB) → mid-layer patch tokens → mask 영역 patches만 select.
 
     Returns:
@@ -94,7 +99,7 @@ def extract_patch_features(crop_bgr, crop_mask, processor, model, device):
     # HuggingFace transformers: hidden_states[0] = embeddings (pre-block),
     # hidden_states[i+1] = i-th transformer block output.
     # "Layer 8" PatchCore convention = post-8th-block = hidden_states[9].
-    patch_tokens = outputs.hidden_states[DINOV2_LAYER + 1][0, 1:, :].cpu().numpy()  # (256, 768) — CLS 제외
+    patch_tokens = outputs.hidden_states[layer + 1][0, 1:, :].cpu().numpy()  # (256, 768) — CLS 제외
 
     mask_resized = cv2.resize(
         crop_mask.astype(np.uint8), (GRID_SIZE, GRID_SIZE), interpolation=cv2.INTER_AREA
@@ -113,7 +118,11 @@ def main():
     ap.add_argument("--output", default=None)
     ap.add_argument("--exclude", default=None,
                     help="제외 목록 파일 — '<set>/<stem>:<line_idx>' 줄 단위 (# 주석 허용)")
+    ap.add_argument("--layer", type=int, default=DINOV2_LAYER,
+                    help="DinoV2 layer (클래스별 best: haribo=5, pencil_case=5, metal_case=7, mango=8). "
+                         "config dinov2_layer와 일치해야 함")
     args = ap.parse_args()
+    layer = int(args.layer)
 
     excluded = set()
     if args.exclude:
@@ -129,7 +138,7 @@ def main():
     print(f"[load] {args.model} → {args.device}")
     processor = AutoImageProcessor.from_pretrained(args.model)
     model = AutoModel.from_pretrained(args.model).to(args.device).eval()
-    print(f"[layer] {DINOV2_LAYER} (hidden_states[{DINOV2_LAYER + 1}]), input {INPUT_SIZE}x{INPUT_SIZE}, grid {GRID_SIZE}x{GRID_SIZE}")
+    print(f"[layer] {layer} (hidden_states[{layer + 1}]), input {INPUT_SIZE}x{INPUT_SIZE}, grid {GRID_SIZE}x{GRID_SIZE}")
 
     labeled_base = ROOT / args.labeled_base
     set_dirs = sorted([d for d in labeled_base.iterdir() if d.is_dir()])
@@ -177,7 +186,7 @@ def main():
                 if crop is None:
                     continue
 
-                patches, n_grid = extract_patch_features(crop, crop_mask, processor, model, args.device)
+                patches, n_grid = extract_patch_features(crop, crop_mask, processor, model, args.device, layer)
                 if len(patches) == 0:
                     skipped_no_patches += 1
                     continue
@@ -212,7 +221,7 @@ def main():
         class_id=args.class_id,
         class_name=args.class_name,
         dinov2_model=args.model,
-        dinov2_layer=DINOV2_LAYER,
+        dinov2_layer=layer,
         input_size=INPUT_SIZE,
         grid_size=GRID_SIZE,
         n_objects=obj_count,
