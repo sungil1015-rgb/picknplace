@@ -2,7 +2,7 @@ classifier:
   enabled: true
   model_name: facebook/dinov2-large
   use_fast: true
-  reference_bank: weights/patchcore_dinov2_large_layers_12_18_23_v2/layer_23/all_reference_bank.pt
+  reference_bank: weights/dinov2_bank/layer_23/all_reference_bank.pt
   feature_layer: 23
   crop_mode: min_area_rect_square
   top_k: 8

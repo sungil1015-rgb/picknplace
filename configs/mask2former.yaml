@@ -1,6 +1,6 @@
 model:
   checkpoint: facebook/mask2former-swin-large-coco-instance
-  weights: weights/mask2former/model_copy.pt
+  weights: weights/mask2former/best.pt
 input:
   size: [650, 980]
 crop:
