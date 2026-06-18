@@ -13,6 +13,7 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -277,6 +278,7 @@ def tune_one_class(target, processor, model, device, output_dir, max_obj=80):
 
     return {
         "name": name, "polygon_id": poly_id, "auroc": auroc,
+        "mb_file": mb_file,
         "best_threshold": best_th, "best_f1": best_f1,
         "best_tpr": best_tpr, "best_fpr": best_fpr,
         "normal_p99": normal_p99, "defect_p01": defect_p01,
@@ -308,6 +310,26 @@ def main():
     for r in results:
         print(f"  {r['name']:<12} {r['auroc']:>7.3f} {r['overlap']:>10} {r['prev_threshold']:>7.1f} {r['best_threshold']:>10.2f} {r['best_f1']:>6.3f} {r['best_tpr']:>6.3f} {r['best_fpr']:>6.3f} {r['normal_p99']:>9.2f} {r['defect_p01']:>8.2f}")
 
+    # ── 임계 오버라이드 파일 생성 (DefectRegistry가 자동 적용) ──
+    # 키 = memory_bank basename. 이 파일을 weights/에 두면 config 수동 편집 없이 τ 적용됨.
+    out = {r["mb_file"]: round(float(r["best_threshold"]), 4) for r in results}
+    th_path = ROOT / "weights" / "defect_thresholds.json"
+    th_path.parent.mkdir(parents=True, exist_ok=True)
+    th_path.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"\n→ threshold override 저장: {th_path.relative_to(ROOT)}")
+    print(f"   {out}")
+    print("   (이 파일 + 재빌드된 뱅크를 weights/에 두면 registry가 자동 적용 → 작동)")
+
+    # 완전성 검증 — 일부 클래스가 스킵(뱅크 없음/샘플 부족)되면 thresholds.json이 불완전 → 시끄럽게 실패
+    expected = {t[1] for t in TARGETS}
+    done = {r["name"] for r in results}
+    missing = sorted(expected - done)
+    if missing:
+        print(f"\n[ERROR] 튜닝 실패/스킵 클래스: {missing} (뱅크 없음/샘플 부족). "
+              f"thresholds.json 불완전 — 해당 뱅크 재빌드 후 재실행 필요.")
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

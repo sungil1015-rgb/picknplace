@@ -162,6 +162,13 @@ class PatchCoreLite(DefectDetector):
         # L2 NN via (a-b)^2 = a^2 + b^2 - 2 a.b
         if test_patches.device != self.memory_bank.device:
             test_patches = test_patches.to(self.memory_bank.device)
+        # feature dim 대조 — model 불일치(구 dinov2-base 768 뱅크 등) 시 cryptic RuntimeError 대신 명시적 에러
+        if test_patches.shape[1] != self.memory_bank.shape[1]:
+            raise ValueError(
+                f"feature dim mismatch: 테스트 patch dim {test_patches.shape[1]} != "
+                f"memory bank dim {self.memory_bank.shape[1]} ({self.memory_bank_path.name}). "
+                f"backbone/model 불일치 (dinov2-large=1024, base=768) — 같은 model로 뱅크 재빌드 필요."
+            )
         a2 = (test_patches * test_patches).sum(dim=1, keepdim=True)   # (n_q, 1)
         ab = test_patches @ self.memory_bank.T                         # (n_q, N)
         d2 = (a2 + self._mb_sq.unsqueeze(0) - 2 * ab).clamp(min=0)
