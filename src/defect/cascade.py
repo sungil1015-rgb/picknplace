@@ -27,7 +27,7 @@ class CascadeDetector(DefectDetector):
         enabled: bool = True,
         dinov2_layer: int = 8,
         device: Optional[str] = None,
-        model_name: str = "facebook/dinov2-base",
+        model_name: str = "facebook/dinov2-large",
     ):
         self.enabled = bool(enabled)
         self.action = str(action)

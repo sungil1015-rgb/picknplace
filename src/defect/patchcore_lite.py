@@ -28,7 +28,7 @@ class PatchCoreLite(DefectDetector):
         action: str = "reject",
         enabled: bool = True,
         device: Optional[str] = None,
-        model_name: str = "facebook/dinov2-base",
+        model_name: str = "facebook/dinov2-large",
         input_size: int = 224,
         crop_padding_ratio: float = 0.03,
         crop_background: int = 127,

@@ -288,10 +288,11 @@ def main():
     from transformers import AutoImageProcessor, AutoModel
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    MODEL = "facebook/dinov2-large"   # 2026-06-19 large 전환 (config와 일치)
     print(f"[device] {device}")
-    print(f"[load] facebook/dinov2-base")
-    processor = AutoImageProcessor.from_pretrained("facebook/dinov2-base")
-    model = AutoModel.from_pretrained("facebook/dinov2-base").to(device).eval()
+    print(f"[load] {MODEL}")
+    processor = AutoImageProcessor.from_pretrained(MODEL)
+    model = AutoModel.from_pretrained(MODEL).to(device).eval()
 
     output_dir = ROOT / "outputs" / "figs" / "synth_roc"
     output_dir.mkdir(parents=True, exist_ok=True)

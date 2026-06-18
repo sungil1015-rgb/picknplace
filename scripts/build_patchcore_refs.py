@@ -1,13 +1,12 @@
 """PatchCore-lite memory bank 빌드 — 라벨링 polygon 데이터에서 객체별로 DinoV2 mid-layer patch features 추출.
 
-Usage:
-    CUDA_VISIBLE_DEVICES=0 python scripts/build_patchcore_refs.py --class_id 3 --class_name metal_case --layer 7
-    CUDA_VISIBLE_DEVICES=0 python scripts/build_patchcore_refs.py --class_id 5 --class_name pencil_case --layer 5
+Usage (2026-06-19 large/L12 전환 — 현행 운영값):
+    CUDA_VISIBLE_DEVICES=0 python scripts/build_patchcore_refs.py --class_id 3 --class_name metal_case --layer 12
+    CUDA_VISIBLE_DEVICES=0 python scripts/build_patchcore_refs.py --class_id 5 --class_name pencil_case --layer 12
 
-layer ablation (notes/LAYER_ABLATION_REPORT.md) 클래스별 best:
-    haribo=5, pencil_case=5, metal_case=7, mango=8.
---layer 미지정 시 DINOV2_LAYER (8) 기본. config(defect_detection.yaml)의 dinov2_layer와
-반드시 일치시켜야 함 — 불일치 시 PatchCoreLite 로드에서 에러.
+backbone 기본값은 facebook/dinov2-large(24 block). config(defect_detection.yaml)가 전 클래스
+dinov2_layer=12 / model_name=dinov2-large로 통일됨 — 반드시 --layer 12 로 재빌드해야 가드 통과.
+(참고 base 기록 ablation best: haribo=5 pencil=5 metal=7 mango=8 / large 예측: metal=14 등은 후속.)
 """
 from __future__ import annotations
 
@@ -26,7 +25,7 @@ sys.path.insert(0, str(ROOT))
 
 CROP_PADDING_RATIO = 0.03
 CROP_BACKGROUND = 127
-DINOV2_LAYER = 8  # 기본 mid-layer (--layer로 클래스별 override). 0-indexed, 12 blocks 중 8번째 출력
+DINOV2_LAYER = 12  # 기본 (large 통일값, --layer로 override). dinov2-large 24 block 기준 L12=깊이50%
 INPUT_SIZE = 224
 GRID_SIZE = INPUT_SIZE // 14  # ViT patch size 14 → 16x16 grid
 
@@ -112,7 +111,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--class_id", type=int, required=True, help="라벨링 polygon class_id (data.yaml 매핑)")
     ap.add_argument("--class_name", type=str, required=True, help="output 파일명")
-    ap.add_argument("--model", default="facebook/dinov2-base")
+    ap.add_argument("--model", default="facebook/dinov2-large")  # 2026-06-19 large 전환
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--labeled_base", default="data/labeled")
     ap.add_argument("--output", default=None)

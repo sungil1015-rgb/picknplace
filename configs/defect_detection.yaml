@@ -41,21 +41,29 @@
 
 enabled: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-06-19 backbone 전환: DINOv2-base → DINOv2-large, 전 클래스 dinov2_layer=12 통일.
+#   근거: large(24 block)로 모델 업그레이드. L12 = 깊이 50% = 클래스별 plateau 교집합으로
+#   다관점 예측(메탈 L14 / 젤리껌 L16 / 필통 L13 / 하리보 L11; 밴드 L10~L18)의 안전한 공통값.
+#   시간 제약상 클래스별 sweep 대신 단일 L12 채택(팀원이 L12 patch embedding 기추출).
+#   ⚠ STAGED: 모든 memory_bank는 large·L12로 재빌드 + threshold 재튜닝 필요.
+#      재빌드 전까지 PatchCoreLite 가드(layer/L12 불일치)로 로드 시 에러로 멈춤.
+#      재빌드: build_patchcore_refs.py --model facebook/dinov2-large --layer 12 ...
+#   추후 정밀화 여지: 메탈 L14·젤리껌 L16 등 클래스별 best로 분리(sweep 후).
+# ─────────────────────────────────────────────────────────────────────────────
+
 detectors:
-  # 0: haribo (LOO CV=0.191, ROC AUROC=0.929@L8, F1-best τ=8.59@L8)
-  #    layer ablation 클래스별 best: L5 (AUROC 0.942, L7 0.941과 거의 동급).
-  #    ⚠ STAGED: dinov2_layer=5로 변경했으나 weights/patchcore_haribo.npz는 아직 L8.
-  #       서버 복구 후 `build_patchcore_refs.py --class_id 1 --class_name haribo --layer 5`로
-  #       재빌드 + LOO ROC로 patchcore.threshold 재튜닝 전까지 PatchCoreLite 로드 시 에러로 멈춤.
+  # 0: haribo — large/L12 통일 (구 base L8 0.929, ablation best L5; large 예측 L11)
   0:
     type: cascade
     enabled: true
-    dinov2_layer: 5            # was 8 (ablation best). 뱅크 재빌드 전까지 비활성(에러)
+    dinov2_layer: 12          # large 통일. 뱅크 재빌드(large·L12) 전까지 가드로 비활성
+    model_name: facebook/dinov2-large
     memory_bank: weights/patchcore_haribo.npz
     color_prior: weights/color_gmm_haribo.npz
     signals:
       patchcore:
-        threshold: 8.6         # TODO: L5 재튜닝 필요 — 현재값은 L8 기준이라 무효
+        threshold: 8.6         # TODO: large·L12 재튜닝 필요 — 현재값 무효(base L8 기준)
       color:
         z_threshold: 3.0
         outlier_ratio_threshold: 0.10
@@ -75,45 +83,41 @@ detectors:
   #    주의: Laplacian 채널 TPR은 합성으로 검증 불가 (RGB만 합성) — w=0.25는 사전 설정값.
   1:
     type: fusion
-    enabled: false      # 실물 찢김 TPR 검증 후 true 전환
+    enabled: false      # 실물 찢김 TPR 검증 후 true 전환 (large 전환 후 pc_mu/sigma 재캘리브도 필요)
     memory_bank: weights/patchcore_mango_v2.npz
-    threshold: 1.8      # fused z. 정상 z_pc p99=1.98 기준 0.75*1.98+margin. 실측 후 재tune
-    pc_mu: 7.95         # 정상 LOO score 평균 (recovery_eval_mango.json, max agg)
-    pc_sigma: 1.18
+    threshold: 1.8      # TODO: large·L12 재튜닝 (base 값 무효)
+    pc_mu: 7.95         # ⚠ base L8/max 기준값 — large·L12 재빌드 후 재산출 필수
+    pc_sigma: 1.18      # ⚠ 동일 (large에서 무효)
     lap_weight: 0.25
     lap_peak_threshold: 0.30   # cascade 컨벤션과 동일
     lap_mu: 0.0         # 실측 normal map 통계로 갱신 예정 (로봇 테스트 warm-up)
     lap_sigma: 1.0
     lap_erosion_px: 7
-    dinov2_layer: 8            # ablation 클래스별 best (단일 L8=0.870; L4+L8+L11 결합 0.888은 단일-layer detector 미지원). 유지
+    dinov2_layer: 12          # large 통일 (구 base best L8). large 예측 L16, 단일 강제 시. 재빌드 필요
+    model_name: facebook/dinov2-large
     patch_aggregate: max       # top_k는 mango에서 AUROC 하락 (0.816 vs 0.880) — 소형 tear 신호 희석
     action: reject
 
-  # 2: pencil_case (LOO CV=0.354 outlier 4개 비닐 영향, ROC AUROC=0.986@L8, F1-best τ=9.12@L8)
-  #    layer ablation 클래스별 best: L5 (AUROC 0.996, L11과 공동 1위).
-  #    ⚠ STAGED: dinov2_layer=5로 변경. weights/patchcore_pencil_case.npz는 아직 L8 →
-  #       `build_patchcore_refs.py --class_id <pencil cid> --class_name pencil_case --layer 5` 재빌드 +
-  #       threshold 재튜닝 전까지 로드 에러로 멈춤.
+  # 2: pencil_case — large/L12 통일 (구 base L8 0.986, ablation best L5; large 예측 L13, 단 쌍봉 L22 가능)
   2:
     type: patchcore
     enabled: true
     memory_bank: weights/patchcore_pencil_case.npz
-    threshold: 9.2            # TODO: L5 재튜닝 필요 — 현재값은 L8 기준이라 무효
-    dinov2_layer: 5           # was 8 (ablation best)
+    threshold: 9.2            # TODO: large·L12 재튜닝 필요 — 현재값 무효(base L8 기준)
+    dinov2_layer: 12          # large 통일
+    model_name: facebook/dinov2-large
     patch_aggregate: max
     action: reject
 
-  # 3: metal_case (LOO CV=0.112, ROC AUROC=0.998@L8, F1-best τ=8.93@L8. 가장 강력)
-  #    layer ablation 클래스별 best: L7 (AUROC 0.999, 유일하게 SEPARATED, FPR 4%→1%).
-  #    report 참고 τ: L7 F1-best 5.76 → 보수적 절상 6.0 (재빌드 후 실측 재확인 필요).
-  #    ⚠ STAGED: weights/patchcore_metal_case.npz는 아직 L8 →
-  #       `build_patchcore_refs.py --class_id 4 --class_name metal_case --layer 7` 재빌드 전까지 로드 에러.
+  # 3: metal_case — large/L12 통일 (구 base L8 0.998, ablation best L7 SEPARATED; large 예측 L14[확신높음])
+  #    참고: large sweep 여유 생기면 메탈은 L14가 유력 — 우선 L12 공통값 채택.
   3:
     type: patchcore
     enabled: true
     memory_bank: weights/patchcore_metal_case.npz
-    threshold: 6.0           # L7 참고 τ(5.76) 보수 절상. TODO: 재빌드 후 LOO 재확인
-    dinov2_layer: 7          # was 8 (ablation best, SEPARATED)
+    threshold: 6.0           # TODO: large·L12 재튜닝 필요 — 현재값 무효(base 참고치)
+    dinov2_layer: 12         # large 통일 (메탈 best 예측은 L14)
+    model_name: facebook/dinov2-large
     patch_aggregate: max
     action: reject
 
