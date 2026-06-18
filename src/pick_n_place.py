@@ -167,18 +167,7 @@ class PickNPlace:
             priority_cfg = config.get("priority", {})
             if not isinstance(priority_cfg, dict):
                 raise ValueError("priority config section 'priority' must be a mapping")
-            scorer = GraspPriorityScorer(
-                depth_weight=float(_required(priority_cfg, "depth_weight", "priority")),
-                center_weight=float(_required(priority_cfg, "center_weight", "priority")),
-                isolation_weight=float(_required(priority_cfg, "clearance_weight", "priority")),
-                area_weight=float(_required(priority_cfg, "area_weight", "priority")),
-                mode=str(_required(priority_cfg, "mode", "priority")),
-                depth_candidate_score_margin=float(_required(priority_cfg, "depth_candidate_score_margin", "priority")),
-                depth_percentile=float(_required(priority_cfg, "depth_percentile", "priority")),
-                depth_percentile_by_class=_class_float_mapping(priority_cfg.get("depth_percentile_by_class", {})),
-                erosion_kernel=int(_required(priority_cfg, "erosion_kernel", "priority")),
-                clearance_max_distance=float(_required(priority_cfg, "clearance_max_distance", "priority")),
-            )
+            scorer = GraspPriorityScorer(local_depth_window=int(priority_cfg.get("local_depth_window", 11)))
             self.logger.info(f"[{self.name}] GraspPriorityScorer 로드 완료: {priority_config}")
             return scorer
         except Exception as exc:
@@ -376,18 +365,13 @@ class PickNPlace:
         )
         for instance, priority_score in zip(kept_predictions, priority_scores):
             instance.grasp_priority = priority_score.total
-            instance.grasp_support_score = priority_score.support_score
             instance.grasp_depth_score = priority_score.depth_score
-            instance.grasp_center_score = priority_score.center_score
-            instance.grasp_isolation_score = priority_score.isolation_score
-            instance.grasp_clearance_score = priority_score.clearance_score
-            instance.grasp_area_score = priority_score.area_score
-            instance.grasp_clearance_distance = priority_score.clearance_distance
             instance.grasp_mask_area = priority_score.mask_area
-            instance.grasp_object_depth = priority_score.object_depth
-            instance.grasp_center_distance = priority_score.center_distance
-            instance.grasp_depth_candidate = priority_score.depth_candidate
+            instance.grasp_depth = priority_score.grasp_depth
+            instance.grasp_xy = list(priority_score.grasp_xy) if priority_score.grasp_xy is not None else None
             instance.grasp_valid_depth = priority_score.valid_depth
+            instance.grasp_class_similarity = priority_score.class_similarity
+            instance.grasp_class_reject_reason = priority_score.class_reject_reason
 
         if compute_suction_pts:
             for instance in kept_predictions:
@@ -512,7 +496,7 @@ class PickNPlace:
                         anchor_xy = np.asarray([int(center_xy[0]), int(center_xy[1])], dtype=np.int32)
             if is_grasp_target:
                 priority = getattr(predictions[index], "grasp_priority", None) if index < len(predictions) else None
-                depth = getattr(predictions[index], "grasp_object_depth", None) if index < len(predictions) else None
+                depth = getattr(predictions[index], "grasp_depth", None) if index < len(predictions) else None
                 target_text = "GRASP #1"
                 if priority is not None:
                     target_text += f" P:{float(priority):.2f}"

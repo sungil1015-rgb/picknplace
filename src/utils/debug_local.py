@@ -341,18 +341,13 @@ def _priority_debug(prediction: Any) -> dict[str, Any]:
     footprint = getattr(prediction, "suction_footprint", None)
     return {
         "priority": _finite_float(getattr(prediction, "grasp_priority", None)),
-        "support_score": _finite_float(getattr(prediction, "grasp_support_score", None)),
         "depth_score": _finite_float(getattr(prediction, "grasp_depth_score", None)),
-        "center_score": _finite_float(getattr(prediction, "grasp_center_score", None)),
-        "isolation_score": _finite_float(getattr(prediction, "grasp_isolation_score", None)),
-        "clearance_score": _finite_float(getattr(prediction, "grasp_clearance_score", None)),
-        "clearance_distance": _finite_float(getattr(prediction, "grasp_clearance_distance", None)),
-        "area_score": _finite_float(getattr(prediction, "grasp_area_score", None)),
-        "mask_area": getattr(prediction, "grasp_mask_area", None),
-        "object_depth": _finite_float(getattr(prediction, "grasp_object_depth", None)),
-        "center_distance": _finite_float(getattr(prediction, "grasp_center_distance", None)),
-        "depth_candidate": bool(getattr(prediction, "grasp_depth_candidate", False)),
+        "grasp_depth": _finite_float(getattr(prediction, "grasp_depth", None)),
+        "grasp_xy": getattr(prediction, "grasp_xy", None),
+        "class_similarity": _finite_float(getattr(prediction, "grasp_class_similarity", None)),
+        "class_reject_reason": getattr(prediction, "grasp_class_reject_reason", None),
         "valid_depth": bool(getattr(prediction, "grasp_valid_depth", False)),
+        "mask_area": getattr(prediction, "grasp_mask_area", None),
         "suction_normal_z_score": _finite_float(getattr(prediction, "suction_normal_z_score", None)),
         "suction_footprint": footprint if isinstance(footprint, dict) else None,
         "suction_candidates": list(getattr(prediction, "suction_candidates", []) or []),
@@ -367,7 +362,7 @@ def _draw_grasp_target_label(
     color: tuple[int, int, int],
 ) -> None:
     priority = _finite_float(getattr(prediction, "grasp_priority", None)) if prediction is not None else None
-    depth = _finite_float(getattr(prediction, "grasp_object_depth", None)) if prediction is not None else None
+    depth = _finite_float(getattr(prediction, "grasp_depth", None)) if prediction is not None else None
     text = "GRASP #1"
     if priority is not None:
         text += f" P:{priority:.2f}"

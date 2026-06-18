@@ -22,7 +22,7 @@ classifier:
   # Class ids here use the internal/debug ids: 0..4. Unknown is 5.
   # One-based bank labels/class_names are normalized to 0..4 when loaded.
   min_similarity_by_class:
-    0: 0.75
+    0: 0.80
     1: 0.80
     2: 0.65
     3: 0.65
