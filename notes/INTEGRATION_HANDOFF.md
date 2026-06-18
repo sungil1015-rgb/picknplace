@@ -76,7 +76,7 @@ weights/
 | class(idx) | detector | layer | model | 비고 |
 |---|---|---|---|---|
 | 하리보(0) | cascade(≥2/4) | 12 | dinov2-large | color GMM 필요 |
-| 젤리껌/mango(1) | patchcore | 12 | dinov2-large | "운에 맡김"(정량검증X, 작동O) |
+| 젤리껌/mango(1) | patchcore | 12 | dinov2-large | 보수적 운영(정량검증X, 작동O) |
 | 필통(2) | patchcore | 12 | dinov2-large | |
 | 메탈케이스(3) | patchcore | 12 | dinov2-large | |
 | 물병(4)·언노운(5) | — | — | — | 제외/우회 |

@@ -71,7 +71,7 @@
   <b style="font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:#4338ca">현행 운영 상태 (2026-06-19 갱신)</b><br>
   아래 도식의 <b>layer 수치(L5/L7/L8)·mango fusion</b>은 <b>base 시절 분석 기준</b>이다. 현재 운영은 →
   <b>DINOv2-large(dim 1024) · 전 클래스 dinov2_layer=12 통일</b>,
-  <b>mango(젤리껌)는 fusion 아닌 plain patchcore "운에 맡김"(enabled)</b>이며
+  <b>mango(젤리껌)는 fusion 아닌 plain patchcore로 운영(enabled)</b>하며 정량 TPR 검증은 보류 상태,
   <b>임계는 보수적</b>(τ=max(F1-best, 정상 p99.5) — 비닐 정상 구겨짐 오거부 방지),
   나머지는 <code style="font-family:var(--mono);font-size:12px">weights/defect_thresholds.json</code>으로 <b>자동 적용</b>(없으면 fail-loud).
   로직(PatchCore/Cascade/다수결, 분류↔결함 layer 분리)은 동일.
@@ -412,7 +412,7 @@
       <text x="78" y="709">0</text><text x="150" y="709">haribo</text><text x="320" y="709">cascade</text><text x="470" y="709" fill="#b45309">L5*</text><text x="560" y="709">8.6</text><text x="660" y="709" fill="#047857">✅</text><text x="790" y="709">.93(L5 .94)</text><text x="900" y="709" fill="#5b6472">≥2/4 다수결</text>
 
       <rect x="60" y="718" width="1120" height="28" fill="#fafbfc" stroke="var(--line)"/>
-      <text x="78" y="737">1</text><text x="150" y="737">mango</text><text x="320" y="737">patchcore</text><text x="470" y="737" fill="#b45309">L12</text><text x="560" y="737">p99.5</text><text x="660" y="737" fill="#047857">✅</text><text x="790" y="737">.88(PCmax)</text><text x="900" y="737" fill="#5b6472">"운에 맡김"·보수적 τ(구겨짐 오거부↓)</text>
+      <text x="78" y="737">1</text><text x="150" y="737">mango</text><text x="320" y="737">patchcore</text><text x="470" y="737" fill="#b45309">L12</text><text x="560" y="737">p99.5</text><text x="660" y="737" fill="#047857">✅</text><text x="790" y="737">.88(PCmax)</text><text x="900" y="737" fill="#5b6472">TPR 검증 보류·보수적 τ(정상 구겨짐 오거부↓)</text>
 
       <rect x="60" y="746" width="1120" height="28" fill="#fff" stroke="var(--line)"/>
       <text x="78" y="765">2</text><text x="150" y="765">pencil_case</text><text x="320" y="765">patchcore</text><text x="470" y="765" fill="#b45309">L5*</text><text x="560" y="765">9.2</text><text x="660" y="765" fill="#047857">✅</text><text x="790" y="765">.986</text><text x="900" y="765" fill="#5b6472">max agg</text>

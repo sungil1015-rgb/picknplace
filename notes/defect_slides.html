@@ -37,23 +37,19 @@ overflow:hidden;border-radius:7px;box-shadow:0 8px 30px rgba(0,0,0,.34)}
 table{border-collapse:collapse;font-size:14.5px;width:100%}
 th,td{border:1px solid var(--line);padding:6px 10px;text-align:left}
 th{background:var(--slate-bg);font-weight:700}
-svg{max-width:100%;height:auto;display:block}
+svg{max-width:100%;height:auto;display:block;margin-left:auto;margin-right:auto}
+.slide>svg,.slide svg{max-height:548px}
 .title-slide{display:flex;flex-direction:column;justify-content:center;min-height:720px}
 .title-slide h1{font-size:42px;line-height:1.18;margin:0 0 14px;letter-spacing:-.5px}
 @media print{@page{size:1280px 720px;margin:0}body{background:#fff;padding:0}.deck{gap:0}
 .slide{box-shadow:none;border-radius:0;page-break-after:always;break-after:page;min-height:720px;height:720px}}
 </style></head>
-<body><div class="deck"><section class="slide title-slide" id="slide-0">
-  <div class="s-eyebrow">논문 발표 · Bin-Picking Surface Defect Detection</div>
-  <h1>분류 + 불량탐지 로직: 공유 DINOv2 substrate 기반 클래스별 라우팅 이상탐지 (DINOv2-large · L12 통일 · 2026-06-19)</h1>
-  <div class="s-kicker">하나의 DINOv2-large backbone forward로 '무엇인지(분류)'와 '정상에서 벗어났는지(결함)'를 상보적으로 판정 · 클래스별 라우팅 이상탐지</div>
-  <div class="s-foot"><span class="mono">src/defect/* · src/classifier/dinov2.py · DINOv2-large · dinov2_layer=12</span><span class="mono">2026-06-19 · 수치는 base·합성·LOO·단일seed 기준</span></div>
-</section><section class="slide" id="slide-1" style="position:relative;width:1280px;height:720px;background:#ffffff;font-family:'Segoe UI','Helvetica Neue',Arial,'Malgun Gothic',sans-serif;overflow:hidden;box-sizing:border-box;">
+<body><div class="deck"><section class="slide" id="slide-1" style="position:relative;width:1280px;height:720px;background:#ffffff;font-family:'Segoe UI','Helvetica Neue',Arial,'Malgun Gothic',sans-serif;overflow:hidden;box-sizing:border-box;">
 
   <!-- 상단 제목밴드 영역(~120px) — 의도적 여백, 호흡 -->
 
-  <!-- 우상단 미니 아키텍처 파이프라인 SVG -->
-  <svg width="276" height="120" viewBox="0 0 276 120" style="position:absolute;left:940px;top:140px;" aria-label="파이프라인 미니어처">
+  <!-- 우상단 미니 아키텍처 파이프라인 SVG (우측 64px 그리드에 정렬, 제목블록과 광학 중앙 맞춤) -->
+  <svg width="276" height="120" viewBox="0 0 276 120" style="position:absolute;left:940px;top:286px;" aria-label="파이프라인 미니어처">
     <defs>
       <marker id="ah-s1" markerWidth="7" markerHeight="7" refX="5.2" refY="2.6" orient="auto">
         <path d="M0,0 L5,2.6 L0,5.2 Z" fill="#94a0b0"></path>
@@ -94,8 +90,8 @@ svg{max-width:100%;height:auto;display:block}
     <text x="168" y="78" text-anchor="middle" font-size="11" fill="#475569">suction</text>
   </svg>
 
-  <!-- 세로 중앙 제목 블록 (좌측 정렬 64px 마진, y≈240~440) -->
-  <div style="position:absolute;left:64px;top:240px;width:840px;">
+  <!-- 세로 중앙 제목 블록 (좌측 정렬 64px 마진, 본문영역 광학 중앙 y≈264~452) -->
+  <div style="position:absolute;left:64px;top:264px;width:840px;">
     <div class="s-eyebrow" style="font-size:12px;letter-spacing:1.6px;text-transform:uppercase;color:#5b6472;font-weight:600;margin-bottom:22px;">논문 발표 · Bin-Picking Surface Defect Detection</div>
 
     <div class="s-title" style="font-size:30px;line-height:1.34;color:#15181f;font-weight:700;margin-bottom:20px;">
@@ -123,19 +119,15 @@ svg{max-width:100%;height:auto;display:block}
 
 </section>
 <section class="slide" id="slide-2">
-  <!-- ===== 제목밴드 (상단 0~120) ===== -->
-  <div class="row" style="position:absolute; left:64px; right:64px; top:34px; display:flex; align-items:flex-end; justify-content:space-between;">
-    <div>
-      <div class="s-eyebrow" style="font-size:12px; letter-spacing:.14em; color:#5b6472; text-transform:uppercase;">SYSTEM OVERVIEW</div>
-      <div class="s-title" style="font-size:30px; font-weight:700; color:#15181f; line-height:1.1; margin-top:6px;">한눈에 보는 시스템 개요</div>
-    </div>
-    <div class="s-eyebrow muted" style="font-size:12px; color:#5b6472; text-align:right; padding-bottom:4px; letter-spacing:.04em;">전체 아키텍처 · 단일 도식</div>
-  </div>
-  <div class="divider" style="position:absolute; left:64px; right:64px; top:112px; height:1.4px; background:#d4dae2;"></div>
+  <!-- ===== 제목밴드 (그리드 정렬: left 64 · 타이틀 y 동일) ===== -->
+  <div class="s-eyebrow" style="position:absolute; left:64px; top:36px; font-size:12px; letter-spacing:.14em; color:#5b6472; text-transform:uppercase;">SYSTEM OVERVIEW</div>
+  <div class="s-title" style="position:absolute; left:64px; top:54px; font-size:30px; font-weight:700; color:#15181f; line-height:1.1;">한눈에 보는 시스템 개요</div>
+  <div class="s-eyebrow muted" style="position:absolute; right:64px; top:58px; font-size:12px; color:#5b6472; text-align:right; letter-spacing:.04em;">전체 아키텍처 · 단일 도식</div>
+  <div class="divider" style="position:absolute; left:64px; right:64px; top:104px; height:1.4px; background:#d4dae2;"></div>
   <div class="s-num" style="position:absolute; right:30px; bottom:14px; font-size:12px; color:#5b6472;">02</div>
 
-  <!-- ===== 본문영역 (y 120~660) : 단일 SVG 가로 도식 ===== -->
-  <svg viewBox="0 0 1280 540" width="1152" height="486" style="position:absolute; left:64px; top:128px;" font-family="inherit">
+  <!-- ===== 본문영역 (y 128~556) : 단일 SVG 가로 도식 · viewBox 1280×476 (2.69:1) ===== -->
+  <svg viewBox="0 0 1280 476" width="1152" height="428" style="position:absolute; left:64px; top:128px;" font-family="inherit">
     <defs>
       <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M0,0 L10,5 L0,10 z" fill="#5b6472"/>
@@ -151,131 +143,131 @@ svg{max-width:100%;height:auto;display:block}
       </marker>
     </defs>
 
-    <!-- 스테이지 캡션 라벨 (상단 가이드) -->
-    <text x="92"  y="20" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">① 입력</text>
-    <text x="250" y="20" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">② 분할</text>
-    <text x="560" y="20" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">③ 공유 substrate</text>
-    <text x="900" y="20" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">④ 클래스별 라우팅</text>
-    <text x="1170" y="20" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">⑤ grasp</text>
+    <!-- 스테이지 캡션 라벨 (상단 가이드) — 각 스택 중앙 기준, viewBox 내부 -->
+    <text x="92"  y="16" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">① 입력</text>
+    <text x="254" y="16" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">② 분할</text>
+    <text x="562" y="16" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">③ 공유 substrate</text>
+    <text x="917" y="16" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">④ 클래스별 라우팅</text>
+    <text x="1149" y="16" text-anchor="middle" font-size="11.5" fill="#5b6472" letter-spacing=".02em">⑤ grasp</text>
 
     <!-- ===== ① 입력 노드 (좌끝) ===== -->
     <g>
-      <rect x="40" y="180" width="104" height="86" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <text x="92" y="208" text-anchor="middle" font-size="13" font-weight="600" fill="#15181f">입력</text>
-      <text x="92" y="228" text-anchor="middle" font-size="11" fill="#5b6472">RGB-D</text>
-      <text x="92" y="244" text-anchor="middle" font-size="11" fill="#5b6472">+ normal</text>
-      <text x="92" y="260" text-anchor="middle" font-size="11" fill="#5b6472">+ ROI</text>
+      <rect x="40" y="150" width="104" height="86" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <text x="92" y="178" text-anchor="middle" font-size="13" font-weight="600" fill="#15181f">입력</text>
+      <text x="92" y="198" text-anchor="middle" font-size="11" fill="#5b6472">RGB-D</text>
+      <text x="92" y="214" text-anchor="middle" font-size="11" fill="#5b6472">+ normal</text>
+      <text x="92" y="230" text-anchor="middle" font-size="11" fill="#5b6472">+ ROI</text>
     </g>
-    <line x1="144" y1="223" x2="194" y2="223" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah)"/>
+    <line x1="144" y1="193" x2="194" y2="193" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah)"/>
 
     <!-- ===== ② 분할 + polygon ===== -->
     <g>
-      <rect x="196" y="184" width="116" height="46" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <text x="254" y="205" text-anchor="middle" font-size="12.5" font-weight="600" fill="#15181f">분할</text>
-      <text x="254" y="221" text-anchor="middle" font-size="10.5" fill="#5b6472">Mask2Former</text>
-      <rect x="196" y="238" width="116" height="40" rx="8" fill="#ffffff" stroke="#475569" stroke-width="1.4"/>
-      <text x="254" y="263" text-anchor="middle" font-size="12" fill="#475569">polygon crop</text>
+      <rect x="196" y="154" width="116" height="46" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <text x="254" y="175" text-anchor="middle" font-size="12.5" font-weight="600" fill="#15181f">분할</text>
+      <text x="254" y="191" text-anchor="middle" font-size="10.5" fill="#5b6472">Mask2Former</text>
+      <rect x="196" y="208" width="116" height="40" rx="8" fill="#ffffff" stroke="#475569" stroke-width="1.4"/>
+      <text x="254" y="233" text-anchor="middle" font-size="12" fill="#475569">polygon crop</text>
     </g>
-    <line x1="312" y1="223" x2="368" y2="223" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah)"/>
+    <line x1="312" y1="193" x2="368" y2="193" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah)"/>
 
     <!-- ===== ③ 공유 substrate 큰 컨테이너 (중앙) ===== -->
     <g>
-      <rect x="370" y="118" width="384" height="290" rx="10" fill="#fbfbfd" stroke="#475569" stroke-width="1.4"/>
-      <text x="562" y="142" text-anchor="middle" font-size="12.5" font-weight="700" fill="#15181f">공유 substrate</text>
-      <text x="562" y="159" text-anchor="middle" font-size="11" fill="#5b6472">같은 crop 224 · 16×16 patch · DINOv2-large 1회 forward</text>
+      <rect x="370" y="88" width="384" height="290" rx="10" fill="#fbfbfd" stroke="#475569" stroke-width="1.4"/>
+      <text x="562" y="112" text-anchor="middle" font-size="12.5" font-weight="700" fill="#15181f">공유 substrate</text>
+      <text x="562" y="129" text-anchor="middle" font-size="11" fill="#5b6472">같은 crop 224 · 16×16 patch · DINOv2-large 1회 forward</text>
 
       <!-- 위: 분류 (indigo) -->
-      <rect x="398" y="174" width="328" height="50" rx="8" fill="#eef0fc" stroke="#4338ca" stroke-width="1.4"/>
-      <text x="562" y="194" text-anchor="middle" font-size="12.5" font-weight="600" fill="#4338ca">분류 — 최종 layer (semantic)</text>
-      <text x="562" y="212" text-anchor="middle" font-size="11" fill="#4338ca">CLS-only 임베딩 · cosine KNN + unknown gating</text>
+      <rect x="398" y="144" width="328" height="50" rx="8" fill="#eef0fc" stroke="#4338ca" stroke-width="1.4"/>
+      <text x="562" y="164" text-anchor="middle" font-size="12.5" font-weight="600" fill="#4338ca">분류 — 최종 layer (semantic)</text>
+      <text x="562" y="182" text-anchor="middle" font-size="11" fill="#4338ca">CLS-only 임베딩 · cosine KNN + unknown gating</text>
 
       <!-- 가운데: 공유 backbone (ink 굵은 노드) -->
-      <rect x="398" y="236" width="328" height="48" rx="8" fill="#15181f" stroke="#15181f" stroke-width="1.4"/>
-      <text x="562" y="256" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">공유 backbone · DINOv2-large</text>
-      <text x="562" y="273" text-anchor="middle" font-size="10.5" fill="#cbd2dd">24 block · dim 1024 · L12 통일</text>
+      <rect x="398" y="206" width="328" height="48" rx="8" fill="#15181f" stroke="#15181f" stroke-width="1.4"/>
+      <text x="562" y="226" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">공유 backbone · DINOv2-large</text>
+      <text x="562" y="243" text-anchor="middle" font-size="10.5" fill="#cbd2dd">24 block · dim 1024 · L12 통일</text>
 
       <!-- 아래: 결함 (amber) -->
-      <rect x="398" y="296" width="328" height="50" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
-      <text x="562" y="316" text-anchor="middle" font-size="12.5" font-weight="600" fill="#b45309">결함 — 중간 layer L12 (국소 표면)</text>
-      <text x="562" y="334" text-anchor="middle" font-size="11" fill="#b45309">PatchCore-lite · L2 최근접 → max → score&gt;τ</text>
+      <rect x="398" y="266" width="328" height="50" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
+      <text x="562" y="286" text-anchor="middle" font-size="12.5" font-weight="600" fill="#b45309">결함 — 중간 layer L12 (국소 표면)</text>
+      <text x="562" y="304" text-anchor="middle" font-size="11" fill="#b45309">PatchCore-lite · L2 최근접 → max → score&gt;τ</text>
 
       <!-- 양방향 공유 화살표 (분류 ⇄ backbone, backbone ⇄ 결함) : 회색 -->
-      <line x1="448" y1="224" x2="448" y2="236" stroke="#9aa3b0" stroke-width="1.4" marker-start="url(#ahG)" marker-end="url(#ahG)"/>
-      <line x1="448" y1="284" x2="448" y2="296" stroke="#9aa3b0" stroke-width="1.4" marker-start="url(#ahG)" marker-end="url(#ahG)"/>
-      <text x="676" y="232" text-anchor="middle" font-size="10.5" fill="#5b6472" font-style="italic">상보적</text>
+      <line x1="448" y1="194" x2="448" y2="206" stroke="#9aa3b0" stroke-width="1.4" marker-start="url(#ahG)" marker-end="url(#ahG)"/>
+      <line x1="448" y1="254" x2="448" y2="266" stroke="#9aa3b0" stroke-width="1.4" marker-start="url(#ahG)" marker-end="url(#ahG)"/>
+      <text x="676" y="202" text-anchor="middle" font-size="10.5" fill="#5b6472" font-style="italic">상보적</text>
     </g>
 
-    <!-- 공유 substrate → 라우팅 (분류 결과로 라우팅) : indigo 의미 흐름은 회색 본선 -->
-    <line x1="754" y1="199" x2="820" y2="199" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah)"/>
-    <text x="787" y="190" text-anchor="middle" font-size="10.5" fill="#5b6472">class_index</text>
+    <!-- 공유 substrate → 라우팅 (분류 결과로 라우팅) : 회색 본선 -->
+    <line x1="754" y1="169" x2="820" y2="169" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah)"/>
+    <text x="787" y="160" text-anchor="middle" font-size="10.5" fill="#5b6472">class_index</text>
     <!-- 결함 신호 → 라우팅 진입 -->
-    <line x1="754" y1="321" x2="820" y2="321" stroke="#5b6472" stroke-width="1.4" stroke-dasharray="1 0" marker-end="url(#ah)"/>
+    <line x1="754" y1="291" x2="820" y2="291" stroke="#5b6472" stroke-width="1.4" stroke-dasharray="1 0" marker-end="url(#ah)"/>
 
     <!-- ===== ④ 클래스별 라우팅 4종 (우중앙 세로 스택) ===== -->
     <g font-size="11">
       <!-- 0 하리보 → Cascade -->
-      <rect x="822" y="148" width="190" height="46" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
-      <text x="833" y="166" font-size="11" font-weight="600" fill="#b45309">0 하리보</text>
-      <text x="833" y="182" font-size="10.5" fill="#b45309">Cascade · 4신호 다수결 ≥2</text>
+      <rect x="822" y="118" width="190" height="46" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
+      <text x="834" y="136" font-size="11" font-weight="600" fill="#b45309">0 하리보</text>
+      <text x="834" y="152" font-size="10.5" fill="#b45309">Cascade · 4신호 다수결 ≥2</text>
 
       <!-- 1 젤리껌(mango) → plain PatchCore -->
-      <rect x="822" y="200" width="190" height="46" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" stroke-dasharray="4 3"/>
-      <text x="833" y="218" font-size="11" font-weight="600" fill="#b45309">1 젤리껌 (mango)</text>
-      <text x="833" y="234" font-size="10.5" fill="#b45309">plain PatchCore · 운에 맡김</text>
+      <rect x="822" y="172" width="190" height="46" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" stroke-dasharray="4 3"/>
+      <text x="834" y="190" font-size="11" font-weight="600" fill="#b45309">1 젤리껌 (mango)</text>
+      <text x="834" y="206" font-size="10.5" fill="#b45309">plain PatchCore · 정량검증 보류</text>
 
       <!-- 2 필통 → PatchCore -->
-      <rect x="822" y="252" width="190" height="44" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
-      <text x="833" y="269" font-size="11" font-weight="600" fill="#b45309">2 필통</text>
-      <text x="833" y="285" font-size="10.5" fill="#b45309">PatchCore (max)</text>
+      <rect x="822" y="226" width="190" height="44" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
+      <text x="834" y="243" font-size="11" font-weight="600" fill="#b45309">2 필통</text>
+      <text x="834" y="259" font-size="10.5" fill="#b45309">PatchCore (max)</text>
 
       <!-- 3 메탈케이스 → PatchCore -->
-      <rect x="822" y="302" width="190" height="44" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
-      <text x="833" y="319" font-size="11" font-weight="600" fill="#b45309">3 메탈케이스</text>
-      <text x="833" y="335" font-size="10.5" fill="#b45309">PatchCore (max)</text>
+      <rect x="822" y="278" width="190" height="44" rx="8" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
+      <text x="834" y="295" font-size="11" font-weight="600" fill="#b45309">3 메탈케이스</text>
+      <text x="834" y="311" font-size="10.5" fill="#b45309">PatchCore (max)</text>
     </g>
-    <text x="917" y="364" text-anchor="middle" font-size="10.5" fill="#5b6472" font-style="italic">4 물병 제외 · 5 언노운 우회</text>
+    <text x="917" y="340" text-anchor="middle" font-size="10.5" fill="#5b6472" font-style="italic">4 물병 제외 · 5 언노운 우회</text>
 
     <!-- ===== ⑤ grasp (우끝) ===== -->
     <g>
-      <rect x="1090" y="200" width="118" height="92" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <text x="1149" y="240" text-anchor="middle" font-size="13" font-weight="600" fill="#15181f">grasp</text>
-      <text x="1149" y="258" text-anchor="middle" font-size="10.5" fill="#5b6472">priority</text>
-      <text x="1149" y="273" text-anchor="middle" font-size="10.5" fill="#5b6472">→ suction</text>
+      <rect x="1090" y="170" width="118" height="92" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <text x="1149" y="210" text-anchor="middle" font-size="13" font-weight="600" fill="#15181f">grasp</text>
+      <text x="1149" y="228" text-anchor="middle" font-size="10.5" fill="#5b6472">priority</text>
+      <text x="1149" y="243" text-anchor="middle" font-size="10.5" fill="#5b6472">→ suction</text>
     </g>
     <!-- 분류/라우팅 정상 흐름 → grasp (실선) -->
-    <line x1="1012" y1="171" x2="1088" y2="220" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah)"/>
+    <line x1="1012" y1="141" x2="1088" y2="190" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah)"/>
     <!-- 결함 → grasp : 점선 빨강 '미배선' -->
-    <line x1="1012" y1="324" x2="1088" y2="272" stroke="#c0392b" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ahR)"/>
-    <text x="1052" y="312" text-anchor="middle" font-size="11" font-weight="600" fill="#c0392b">미배선 (설계)</text>
+    <line x1="1012" y1="294" x2="1088" y2="242" stroke="#c0392b" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ahR)"/>
+    <text x="1050" y="282" text-anchor="middle" font-size="11" font-weight="600" fill="#c0392b">미배선 (설계)</text>
 
     <!-- ===== 오프라인 파일 (box--cal, 하단) → 점선 주입 ===== -->
     <g>
-      <rect x="500" y="438" width="380" height="50" rx="8" fill="#e9f6f0" stroke="#047857" stroke-width="1.4"/>
-      <text x="690" y="458" text-anchor="middle" font-size="12.5" font-weight="600" fill="#047857">오프라인 파일 — 뱅크4 (large·L12) + thresholds.json</text>
-      <text x="690" y="476" text-anchor="middle" font-size="10.5" fill="#047857">color GMM · DefectRegistry 로드 시 config placeholder 자동 덮어씀</text>
+      <rect x="450" y="406" width="430" height="52" rx="8" fill="#e9f6f0" stroke="#047857" stroke-width="1.4"/>
+      <text x="665" y="427" text-anchor="middle" font-size="12.5" font-weight="600" fill="#047857">오프라인 파일 — 뱅크4 (large·L12) + thresholds.json</text>
+      <text x="665" y="445" text-anchor="middle" font-size="10.5" fill="#047857">color GMM · DefectRegistry 로드 시 config placeholder 자동 덮어씀</text>
     </g>
     <!-- 점선 주입 → 결함 노드 -->
-    <path d="M560,438 C560,400 562,372 562,348" fill="none" stroke="#047857" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ahC)"/>
-    <text x="500" y="406" text-anchor="middle" font-size="10.5" fill="#047857">자동 덮어씀</text>
+    <path d="M520,406 C520,376 545,348 560,318" fill="none" stroke="#047857" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ahC)"/>
+    <text x="476" y="372" text-anchor="middle" font-size="10.5" fill="#047857">자동 덮어씀</text>
     <!-- 점선 주입 → 라우팅 스택 -->
-    <path d="M860,438 C895,408 917,380 917,348" fill="none" stroke="#047857" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ahC)"/>
-    <text x="960" y="406" text-anchor="middle" font-size="10.5" fill="#047857">자동 덮어씀</text>
+    <path d="M845,406 C880,376 917,350 917,324" fill="none" stroke="#047857" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ahC)"/>
+    <text x="950" y="372" text-anchor="middle" font-size="10.5" fill="#047857">자동 덮어씀</text>
 
-    <!-- ===== 우하단 legend 4칩 ===== -->
+    <!-- ===== 좌하단 legend 4칩 (2열 · offline 박스와 좌우 분리) ===== -->
     <g font-size="11" fill="#5b6472">
-      <rect x="40" y="448" width="13" height="13" rx="3" fill="#eef0fc" stroke="#4338ca" stroke-width="1.4"/>
-      <text x="60" y="459">분류 (semantic)</text>
-      <rect x="40" y="470" width="13" height="13" rx="3" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
-      <text x="60" y="481">결함 (L12 표면)</text>
-      <rect x="195" y="448" width="13" height="13" rx="3" fill="#e9f6f0" stroke="#047857" stroke-width="1.4"/>
-      <text x="215" y="459">오프라인 주입</text>
-      <rect x="195" y="470" width="13" height="13" rx="3" fill="#fdecea" stroke="#c0392b" stroke-width="1.4"/>
-      <text x="215" y="481">미배선 (설계)</text>
+      <rect x="40" y="412" width="13" height="13" rx="3" fill="#eef0fc" stroke="#4338ca" stroke-width="1.4"/>
+      <text x="60" y="423">분류 (semantic)</text>
+      <rect x="40" y="436" width="13" height="13" rx="3" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
+      <text x="60" y="447">결함 (L12 표면)</text>
+      <rect x="200" y="412" width="13" height="13" rx="3" fill="#e9f6f0" stroke="#047857" stroke-width="1.4"/>
+      <text x="220" y="423">오프라인 주입</text>
+      <rect x="200" y="436" width="13" height="13" rx="3" fill="#fdecea" stroke="#c0392b" stroke-width="1.4"/>
+      <text x="220" y="447">미배선 (설계)</text>
     </g>
   </svg>
 
   <!-- ===== 정직성 배지 (푸터 위) ===== -->
-  <div class="s-foot" style="position:absolute; left:64px; right:64px; bottom:18px; display:flex; gap:10px; align-items:center; font-size:12px;">
+  <div class="s-foot" style="position:absolute; left:64px; right:64px; bottom:18px; display:flex; gap:10px; align-items:center; font-size:12px; border-top:none; padding-top:0;">
     <span class="pill" style="display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; background:#fdecea; color:#c0392b; border:1.4px solid #c0392b; font-weight:600;">정직성 · 결함→grasp 미배선</span>
     <span class="pill" style="display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; background:#fdf3e3; color:#b45309; border:1.4px solid #b45309; font-weight:600;">mango TPR 미검증</span>
     <span class="muted" style="color:#5b6472; margin-left:auto;">수치는 base·합성·LOO·단일seed 기준 → 실물 재검증 대상</span>
@@ -291,91 +283,94 @@ svg{max-width:100%;height:auto;display:block}
     6단계 픽앤플레이스 흐름에서 <span class="hl">③ 분류 직후</span>가 결함 판정의 설계 삽입점 — 현재 <span class="muted">pick_n_place.py 미배선</span>
   </div>
 
-  <!-- 좌측 60% : 세로 6단계 플로우 SVG -->
-  <svg width="696" height="412" viewBox="0 0 696 412"
-       style="position:absolute;left:64px;top:128px;" xmlns="http://www.w3.org/2000/svg">
+  <!-- 좌측 : 세로 6단계 플로우 SVG (viewBox 520×412, 노드 폭 확장으로 좌측존 균형) -->
+  <svg width="520" height="412" viewBox="0 0 520 412"
+       style="position:absolute;left:64px;top:130px;" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M0,0 L9,5 L0,10 z" fill="#475569"/>
       </marker>
+      <marker id="ar-amb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L9,5 L0,10 z" fill="#b45309"/>
+      </marker>
     </defs>
 
-    <!-- 화살표(↓) : 노드 사이, 1.4px 통일 -->
-    <line x1="186" y1="50" x2="186" y2="64"  stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
-    <line x1="186" y1="100" x2="186" y2="114" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
-    <line x1="186" y1="150" x2="186" y2="164" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+    <!-- 화살표(↓) : 노드 사이, 1.4px 통일, 중심 x=260 -->
+    <line x1="260" y1="50"  x2="260" y2="64"  stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="260" y1="100" x2="260" y2="114" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="260" y1="150" x2="260" y2="164" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
     <!-- ③→결함박스 (점선=미배선) -->
-    <line x1="186" y1="200" x2="186" y2="214" stroke="#b45309" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+    <line x1="260" y1="200" x2="260" y2="214" stroke="#b45309" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#ar-amb)"/>
     <!-- 결함박스→④ (점선=미배선) -->
-    <line x1="186" y1="276" x2="186" y2="290" stroke="#b45309" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#ar)"/>
-    <line x1="186" y1="326" x2="186" y2="340" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="260" y1="276" x2="260" y2="290" stroke="#b45309" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#ar-amb)"/>
+    <line x1="260" y1="326" x2="260" y2="340" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
 
     <!-- ① -->
     <g>
-      <rect x="32" y="0" width="308" height="50" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <circle cx="56" cy="25" r="11" fill="#475569"/>
-      <text x="56" y="29" font-size="12.5" fill="#ffffff" text-anchor="middle" font-weight="700">1</text>
-      <text x="78" y="21" font-size="12.5" fill="#15181f" font-weight="700">Mask2Former 분할</text>
-      <text x="78" y="38" font-size="11.5" fill="#5b6472">→ instance masks</text>
+      <rect x="56" y="0" width="408" height="50" rx="9" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <circle cx="82" cy="25" r="11" fill="#475569"/>
+      <text x="82" y="29" font-size="12.5" fill="#ffffff" text-anchor="middle" font-weight="700">1</text>
+      <text x="104" y="21" font-size="12.5" fill="#15181f" font-weight="700">Mask2Former 분할</text>
+      <text x="104" y="38" font-size="11.5" fill="#5b6472">→ instance masks</text>
     </g>
 
     <!-- ② -->
     <g>
-      <rect x="32" y="64" width="308" height="50" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <circle cx="56" cy="89" r="11" fill="#475569"/>
-      <text x="56" y="93" font-size="12.5" fill="#ffffff" text-anchor="middle" font-weight="700">2</text>
-      <text x="78" y="85" font-size="12.5" fill="#15181f" font-weight="700">mask 정제 + polygon</text>
-      <text x="78" y="102" font-size="11" fill="#5b6472" class="mono">largest_component · mask_to_polygon</text>
+      <rect x="56" y="64" width="408" height="50" rx="9" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <circle cx="82" cy="89" r="11" fill="#475569"/>
+      <text x="82" y="93" font-size="12.5" fill="#ffffff" text-anchor="middle" font-weight="700">2</text>
+      <text x="104" y="85" font-size="12.5" fill="#15181f" font-weight="700">mask 정제 + polygon</text>
+      <text x="104" y="102" font-size="11" fill="#5b6472" class="mono">largest_component · mask_to_polygon</text>
     </g>
 
     <!-- ③ indigo (분류) -->
     <g>
-      <rect x="32" y="128" width="308" height="50" rx="8" fill="#eef0fc" stroke="#4338ca" stroke-width="1.4"/>
-      <circle cx="56" cy="153" r="11" fill="#4338ca"/>
-      <text x="56" y="157" font-size="12.5" fill="#ffffff" text-anchor="middle" font-weight="700">3</text>
-      <text x="78" y="149" font-size="12.5" fill="#4338ca" font-weight="700">DINOv2 KNN 분류</text>
-      <text x="78" y="166" font-size="11.5" fill="#5b6472">→ class_index · similarity</text>
+      <rect x="56" y="128" width="408" height="50" rx="9" fill="#eef0fc" stroke="#4338ca" stroke-width="1.4"/>
+      <circle cx="82" cy="153" r="11" fill="#4338ca"/>
+      <text x="82" y="157" font-size="12.5" fill="#ffffff" text-anchor="middle" font-weight="700">3</text>
+      <text x="104" y="149" font-size="12.5" fill="#4338ca" font-weight="700">DINOv2 KNN 분류</text>
+      <text x="104" y="166" font-size="11.5" fill="#5b6472">→ class_index · similarity</text>
     </g>
 
     <!-- ★ 결함 판정 : amber 점선 박스 (③·④ 사이) -->
     <g>
-      <rect x="20" y="214" width="332" height="62" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" stroke-dasharray="5 3"/>
-      <text x="36" y="234" font-size="12.5" fill="#b45309" font-weight="700">★ 결함 판정</text>
-      <text x="140" y="234" font-size="11" fill="#b45309" class="mono">설계됨 · 미배선</text>
-      <text x="36" y="251" font-size="11" fill="#15181f" class="mono">DefectRegistry.get(class_index)</text>
-      <text x="36" y="267" font-size="11" fill="#5b6472" class="mono">.score(...) → DefectResult</text>
+      <rect x="44" y="214" width="432" height="62" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" stroke-dasharray="5 3"/>
+      <text x="64" y="234" font-size="12.5" fill="#b45309" font-weight="700">★ 결함 판정</text>
+      <text x="168" y="234" font-size="11" fill="#b45309" class="mono">설계됨 · 미배선</text>
+      <text x="64" y="251" font-size="11" fill="#15181f" class="mono">DefectRegistry.get(class_index)</text>
+      <text x="64" y="267" font-size="11" fill="#5b6472" class="mono">.score(...) → DefectResult</text>
     </g>
 
     <!-- ④ -->
     <g>
-      <rect x="32" y="290" width="308" height="50" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <circle cx="56" cy="315" r="11" fill="#475569"/>
-      <text x="56" y="319" font-size="12.5" fill="#ffffff" text-anchor="middle" font-weight="700">4</text>
-      <text x="78" y="311" font-size="12.5" fill="#15181f" font-weight="700">Grasp priority scoring</text>
-      <text x="78" y="328" font-size="11.5" fill="#5b6472">파지 우선순위 산출</text>
+      <rect x="56" y="290" width="408" height="50" rx="9" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <circle cx="82" cy="315" r="11" fill="#475569"/>
+      <text x="82" y="319" font-size="12.5" fill="#ffffff" text-anchor="middle" font-weight="700">4</text>
+      <text x="104" y="311" font-size="12.5" fill="#15181f" font-weight="700">Grasp priority scoring</text>
+      <text x="104" y="328" font-size="11.5" fill="#5b6472">파지 우선순위 산출</text>
     </g>
 
     <!-- ⑤⑥ : 한 행에 묶어 컴팩트 -->
     <g>
-      <rect x="32" y="354" width="150" height="46" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <circle cx="54" cy="377" r="10" fill="#475569"/>
-      <text x="54" y="381" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="700">5</text>
-      <text x="72" y="372" font-size="11.5" fill="#15181f" font-weight="700">Suction point</text>
-      <text x="72" y="388" font-size="11" fill="#5b6472">top priority</text>
+      <rect x="56" y="354" width="198" height="46" rx="9" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <circle cx="80" cy="377" r="10" fill="#475569"/>
+      <text x="80" y="381" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="700">5</text>
+      <text x="100" y="372" font-size="11.5" fill="#15181f" font-weight="700">Suction point</text>
+      <text x="100" y="388" font-size="11" fill="#5b6472">top priority</text>
     </g>
-    <line x1="182" y1="377" x2="196" y2="377" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="254" y1="377" x2="266" y2="377" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
     <g>
-      <rect x="196" y="354" width="144" height="46" rx="8" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <circle cx="218" cy="377" r="10" fill="#475569"/>
-      <text x="218" y="381" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="700">6</text>
-      <text x="236" y="372" font-size="11.5" fill="#15181f" font-weight="700">정렬 + 반환</text>
-      <text x="236" y="388" font-size="11" fill="#5b6472">결과 출력</text>
+      <rect x="266" y="354" width="198" height="46" rx="9" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <circle cx="290" cy="377" r="10" fill="#475569"/>
+      <text x="290" y="381" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="700">6</text>
+      <text x="310" y="372" font-size="11.5" fill="#15181f" font-weight="700">정렬 + 반환</text>
+      <text x="310" y="388" font-size="11" fill="#5b6472">결과 출력</text>
     </g>
   </svg>
 
-  <!-- 우측 40% : 콜아웃 + 정직성 -->
+  <!-- 우측 40% : 콜아웃 + 정직성 (세로 리듬 균등 · 하단 SVG와 정렬) -->
   <!-- box--def 콜아웃 -->
-  <div class="box box--def" style="position:absolute;left:800px;top:128px;width:416px;padding:14px 16px;">
+  <div class="box box--def" style="position:absolute;left:800px;top:130px;width:416px;padding:14px 16px;">
     <div class="s-eyebrow" style="color:#b45309;">삽입 지점 — score() 시그니처</div>
     <div class="mono" style="font-size:12px;line-height:1.55;color:#15181f;margin-top:6px;">
       detector = DefectRegistry<br/>
@@ -390,7 +385,7 @@ svg{max-width:100%;height:auto;display:block}
   </div>
 
   <!-- 삽입 논리 (③ 직후여야 하는 이유) -->
-  <div class="box" style="position:absolute;left:800px;top:332px;width:416px;padding:12px 16px;">
+  <div class="box" style="position:absolute;left:800px;top:340px;width:416px;padding:12px 16px;">
     <div class="s-eyebrow">③ 직후여야 하는 이유</div>
     <div style="font-size:12.5px;line-height:1.7;color:#15181f;margin-top:4px;">
       <span class="pill" style="background:#eef0fc;color:#4338ca;">a</span> <span class="mono">class_index</span>로 detector 선택<br/>
@@ -400,7 +395,7 @@ svg{max-width:100%;height:auto;display:block}
   </div>
 
   <!-- box--warn : 정직성 / 미배선 -->
-  <div class="box box--warn" style="position:absolute;left:800px;top:466px;width:416px;padding:12px 16px;">
+  <div class="box box--warn" style="position:absolute;left:800px;top:458px;width:416px;padding:12px 16px;">
     <div class="s-eyebrow" style="color:#c0392b;">정직성 — 미배선</div>
     <div style="font-size:12.5px;line-height:1.6;color:#15181f;margin-top:4px;">
       <span class="mono">src/defect/</span> 는 <span class="mono">scripts/</span>(오프라인)에서만 import.
@@ -408,8 +403,8 @@ svg{max-width:100%;height:auto;display:block}
     </div>
   </div>
 
-  <div class="s-foot" style="position:absolute;left:64px;top:548px;">
-    좌측 실선 = 배선됨 · <span style="color:#b45309;">amber 점선 = 설계됨·미배선</span> · ③(indigo)=분류 노드
+  <div class="s-foot">
+    <span>좌측 실선 = 배선됨 · <span style="color:#b45309;">amber 점선 = 설계됨·미배선</span> · ③(indigo)=분류 노드</span>
   </div>
 </section>
 <section class="slide" id="slide-4"><div class="s-num">04</div>
@@ -417,7 +412,7 @@ svg{max-width:100%;height:auto;display:block}
 <h2 class="s-title">같은 crop · 같은 backbone, <span class="hl">다른 layer</span></h2>
 <div class="s-kicker">crop→backbone forward 1회로 두 모듈 입력을 동시 생성 — 최종 layer는 semantic, 중간 L12는 local surface</div>
 
-<svg width="1180" height="452" viewBox="0 0 1180 452" style="display:block;margin:14px 50px 0;" xmlns="http://www.w3.org/2000/svg">
+<svg width="100%" viewBox="0 0 1180 452" preserveAspectRatio="xMidYMid meet" style="display:block;margin:18px 0 0;" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="ah-ink" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M1,1 L9,5 L1,9" fill="none" stroke="#15181f" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -498,8 +493,8 @@ svg{max-width:100%;height:auto;display:block}
   </g>
 </svg>
 
-<div class="divider" style="margin:14px 50px 0;border-top:1.4px solid #d4dae2;"></div>
-<p class="muted" style="margin:10px 50px 0;font-size:12.5px;color:#5b6472;text-align:center;">
+<div class="divider" style="margin:18px 0 0;border-top:1.4px solid #d4dae2;"></div>
+<p class="muted" style="margin:12px 0 0;font-size:12.5px;color:#5b6472;text-align:center;">
   같은 객체 1 forward → 상보적 두 신호 · <span style="color:#4338ca;font-weight:600;">최종 layer(semantic)</span>는 정상/스크래치를 같은 카테고리로 수렴, anomaly 신호는 <span style="color:#b45309;font-weight:600;">중간 L12</span>에서 회수
 </p></section>
 <section class="slide" id="slide-5">
@@ -513,7 +508,7 @@ svg{max-width:100%;height:auto;display:block}
     <!-- LEFT 55% : KNN flow -->
     <div class="col">
       <div class="s-eyebrow muted" style="margin-bottom:8px;">KNN 흐름</div>
-      <svg width="100%" viewBox="0 0 660 330" role="img" aria-label="KNN classification flow">
+      <svg width="100%" viewBox="0 0 554 322" role="img" aria-label="KNN classification flow">
         <defs>
           <marker id="ah5" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
@@ -654,7 +649,7 @@ svg{max-width:100%;height:auto;display:block}
   <div class="s-title">클래스별 라우팅 — <span class="hl">DefectRegistry</span></div>
   <div class="s-kicker"><span class="mono">yaml type</span> 필드로 빌드 분기 · <span class="mono">class_index → detector</span> 매핑 · <span class="mono">get(class_index)</span> → detector 또는 <span class="mono">None</span></div>
 
-  <svg viewBox="0 0 1280 480" width="1280" height="480" style="position:absolute; left:0; top:132px;" xmlns="http://www.w3.org/2000/svg" aria-label="DefectRegistry class routing diagram">
+  <svg viewBox="0 0 1280 366" width="100%" style="display:block; margin:18px auto 0;" role="img" xmlns="http://www.w3.org/2000/svg" aria-label="DefectRegistry class routing diagram">
     <defs>
       <marker id="ah6" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M1,1 L9,5 L1,9" fill="none" stroke="#5b6472" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -663,94 +658,94 @@ svg{max-width:100%;height:auto;display:block}
 
     <!-- 진입 노드 class_index -->
     <g>
-      <rect x="529" y="6" width="222" height="48" rx="9" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
-      <text x="640" y="26" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="14" fill="#15181f">class_index</text>
-      <text x="640" y="43" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11.5" fill="#5b6472">진입 노드 · 라우팅 키</text>
+      <rect x="529" y="4" width="222" height="48" rx="9" fill="#eef1f5" stroke="#475569" stroke-width="1.4"/>
+      <text x="640" y="24" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="14" fill="#15181f">class_index</text>
+      <text x="640" y="41" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11.5" fill="#5b6472">진입 노드 · 라우팅 키</text>
     </g>
 
     <!-- bus line + 4 routing arrows -->
-    <path d="M640,54 L640,76" fill="none" stroke="#5b6472" stroke-width="1.4"/>
-    <path d="M150,76 L1130,76" fill="none" stroke="#5b6472" stroke-width="1.4"/>
-    <path d="M150,76  L150,112"  fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah6)"/>
-    <path d="M476,76  L476,112"  fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah6)"/>
-    <path d="M803,76  L803,112"  fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah6)"/>
-    <path d="M1130,76 L1130,112" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah6)"/>
+    <path d="M640,52 L640,72" fill="none" stroke="#5b6472" stroke-width="1.4"/>
+    <path d="M150,72 L1130,72" fill="none" stroke="#5b6472" stroke-width="1.4"/>
+    <path d="M150,72  L150,106"  fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah6)"/>
+    <path d="M476,72  L476,106"  fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah6)"/>
+    <path d="M803,72  L803,106"  fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah6)"/>
+    <path d="M1130,72 L1130,106" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah6)"/>
 
     <!-- ===== Card 0 : 하리보 Cascade (amber, header tone) ===== -->
     <g>
-      <rect x="48" y="114" width="204" height="150" rx="10" fill="#ffffff" stroke="#d4dae2" stroke-width="1.4"/>
-      <rect x="48" y="114" width="204" height="36" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
-      <rect x="48" y="138" width="204" height="12" fill="#fdf3e3"/>
-      <line x1="48" y1="150" x2="252" y2="150" stroke="#d4dae2" stroke-width="1.4"/>
-      <text x="62" y="137" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#b45309">0 · 하리보 <tspan font-family="ui-monospace,monospace" font-size="11" fill="#b45309">haribo</tspan></text>
-      <text x="62" y="174" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#15181f">type · Cascade</text>
-      <text x="62" y="196" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#5b6472">L12 · large</text>
-      <text x="62" y="218" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#047857">enabled ✅</text>
-      <text x="62" y="246" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">4신호 다수결 voting ≥2</text>
+      <rect x="48" y="108" width="204" height="150" rx="10" fill="#ffffff" stroke="#d4dae2" stroke-width="1.4"/>
+      <rect x="48" y="108" width="204" height="36" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4"/>
+      <rect x="48" y="132" width="204" height="12" fill="#fdf3e3"/>
+      <line x1="48" y1="144" x2="252" y2="144" stroke="#d4dae2" stroke-width="1.4"/>
+      <text x="62" y="131" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#b45309">0 · 하리보 <tspan font-family="ui-monospace,monospace" font-size="11" fill="#b45309">haribo</tspan></text>
+      <text x="62" y="168" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#15181f">type · Cascade</text>
+      <text x="62" y="190" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#5b6472">L12 · large</text>
+      <text x="62" y="212" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#047857">enabled ✅</text>
+      <text x="62" y="240" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">4신호 다수결 voting ≥2</text>
     </g>
 
     <!-- ===== Card 1 : 젤리껌 mango plain PatchCore + dice ===== -->
     <g>
-      <rect x="374" y="114" width="204" height="150" rx="10" fill="#ffffff" stroke="#d4dae2" stroke-width="1.4"/>
-      <rect x="374" y="114" width="204" height="36" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" opacity="0.78"/>
-      <rect x="374" y="138" width="204" height="12" fill="#fdf3e3" opacity="0.78"/>
-      <line x1="374" y1="150" x2="578" y2="150" stroke="#d4dae2" stroke-width="1.4"/>
-      <text x="388" y="137" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#b45309">1 · 젤리껌 <tspan font-family="ui-monospace,monospace" font-size="11" fill="#b45309">mango</tspan></text>
+      <rect x="374" y="108" width="204" height="150" rx="10" fill="#ffffff" stroke="#d4dae2" stroke-width="1.4"/>
+      <rect x="374" y="108" width="204" height="36" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" opacity="0.78"/>
+      <rect x="374" y="132" width="204" height="12" fill="#fdf3e3" opacity="0.78"/>
+      <line x1="374" y1="144" x2="578" y2="144" stroke="#d4dae2" stroke-width="1.4"/>
+      <text x="388" y="131" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#b45309">1 · 젤리껌 <tspan font-family="ui-monospace,monospace" font-size="11" fill="#b45309">mango</tspan></text>
       <!-- dice icon top-right -->
-      <g transform="translate(540,158)">
+      <g transform="translate(540,152)">
         <rect x="0" y="0" width="20" height="20" rx="5" fill="#ffffff" stroke="#b45309" stroke-width="1.4"/>
         <circle cx="6" cy="6" r="1.6" fill="#b45309"/><circle cx="14" cy="6" r="1.6" fill="#b45309"/>
         <circle cx="6" cy="14" r="1.6" fill="#b45309"/><circle cx="14" cy="14" r="1.6" fill="#b45309"/>
       </g>
-      <text x="388" y="174" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#15181f">type · PatchCore</text>
-      <text x="388" y="196" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#5b6472">L12 · large</text>
-      <text x="388" y="218" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#047857">enabled ✅</text>
-      <text x="388" y="246" font-family="system-ui,sans-serif" font-size="11" fill="#b45309">plain · 운에 맡김 · base 0.880</text>
+      <text x="388" y="168" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#15181f">type · PatchCore</text>
+      <text x="388" y="190" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#5b6472">L12 · large</text>
+      <text x="388" y="212" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#047857">enabled ✅</text>
+      <text x="388" y="240" font-family="system-ui,sans-serif" font-size="11" fill="#b45309">plain · 정량검증 보류 · base 0.880</text>
     </g>
 
     <!-- ===== Card 2 : 필통 PatchCore(max) ===== -->
     <g>
-      <rect x="701" y="114" width="204" height="150" rx="10" fill="#ffffff" stroke="#d4dae2" stroke-width="1.4"/>
-      <rect x="701" y="114" width="204" height="36" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" opacity="0.78"/>
-      <rect x="701" y="138" width="204" height="12" fill="#fdf3e3" opacity="0.78"/>
-      <line x1="701" y1="150" x2="905" y2="150" stroke="#d4dae2" stroke-width="1.4"/>
-      <text x="715" y="137" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#b45309">2 · 필통 <tspan font-family="ui-monospace,monospace" font-size="11" fill="#b45309">pencil_case</tspan></text>
-      <text x="715" y="174" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#15181f">type · PatchCore</text>
-      <text x="715" y="196" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#5b6472">L12 · large</text>
-      <text x="715" y="218" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#047857">enabled ✅</text>
-      <text x="715" y="246" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">aggregate · max</text>
+      <rect x="701" y="108" width="204" height="150" rx="10" fill="#ffffff" stroke="#d4dae2" stroke-width="1.4"/>
+      <rect x="701" y="108" width="204" height="36" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" opacity="0.78"/>
+      <rect x="701" y="132" width="204" height="12" fill="#fdf3e3" opacity="0.78"/>
+      <line x1="701" y1="144" x2="905" y2="144" stroke="#d4dae2" stroke-width="1.4"/>
+      <text x="715" y="131" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#b45309">2 · 필통 <tspan font-family="ui-monospace,monospace" font-size="11" fill="#b45309">pencil_case</tspan></text>
+      <text x="715" y="168" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#15181f">type · PatchCore</text>
+      <text x="715" y="190" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#5b6472">L12 · large</text>
+      <text x="715" y="212" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#047857">enabled ✅</text>
+      <text x="715" y="240" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">aggregate · max</text>
     </g>
 
     <!-- ===== Card 3 : 메탈케이스 PatchCore(max) ===== -->
     <g>
-      <rect x="1028" y="114" width="204" height="150" rx="10" fill="#ffffff" stroke="#d4dae2" stroke-width="1.4"/>
-      <rect x="1028" y="114" width="204" height="36" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" opacity="0.78"/>
-      <rect x="1028" y="138" width="204" height="12" fill="#fdf3e3" opacity="0.78"/>
-      <line x1="1028" y1="150" x2="1232" y2="150" stroke="#d4dae2" stroke-width="1.4"/>
-      <text x="1042" y="137" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#b45309">3 · 메탈케이스 <tspan font-family="ui-monospace,monospace" font-size="10.5" fill="#b45309">metal_case</tspan></text>
-      <text x="1042" y="174" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#15181f">type · PatchCore</text>
-      <text x="1042" y="196" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#5b6472">L12 · large</text>
-      <text x="1042" y="218" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#047857">enabled ✅</text>
-      <text x="1042" y="246" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">aggregate · max</text>
+      <rect x="1028" y="108" width="204" height="150" rx="10" fill="#ffffff" stroke="#d4dae2" stroke-width="1.4"/>
+      <rect x="1028" y="108" width="204" height="36" rx="10" fill="#fdf3e3" stroke="#b45309" stroke-width="1.4" opacity="0.78"/>
+      <rect x="1028" y="132" width="204" height="12" fill="#fdf3e3" opacity="0.78"/>
+      <line x1="1028" y1="144" x2="1232" y2="144" stroke="#d4dae2" stroke-width="1.4"/>
+      <text x="1042" y="131" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#b45309">3 · 메탈케이스 <tspan font-family="ui-monospace,monospace" font-size="10.5" fill="#b45309">metal_case</tspan></text>
+      <text x="1042" y="168" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#15181f">type · PatchCore</text>
+      <text x="1042" y="190" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#5b6472">L12 · large</text>
+      <text x="1042" y="212" font-family="ui-monospace,Menlo,monospace" font-size="12.5" fill="#047857">enabled ✅</text>
+      <text x="1042" y="240" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">aggregate · max</text>
     </g>
 
     <!-- ===== bottom-left: 2 exclude/bypass chips ===== -->
     <g>
-      <text x="48" y="298" font-family="system-ui,sans-serif" font-size="11.5" fill="#5b6472" letter-spacing=".04em">제외 · 우회 (라우팅 비대상)</text>
-      <rect x="48" y="308" width="240" height="44" rx="9" fill="#eef1f5" stroke="#d4dae2" stroke-width="1.4"/>
-      <text x="64" y="328" font-family="system-ui,sans-serif" font-size="13" font-weight="700" fill="#15181f">4 · 물병 제외</text>
-      <text x="64" y="345" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">투명 plastic · 빛 투과 patch 혼입</text>
-      <rect x="300" y="308" width="240" height="44" rx="9" fill="#eef1f5" stroke="#d4dae2" stroke-width="1.4"/>
-      <text x="316" y="328" font-family="system-ui,sans-serif" font-size="13" font-weight="700" fill="#15181f">5 · 언노운 우회</text>
-      <text x="316" y="345" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">classifier가 사전 거름</text>
+      <text x="48" y="292" font-family="system-ui,sans-serif" font-size="11.5" fill="#5b6472" letter-spacing=".04em">제외 · 우회 (라우팅 비대상)</text>
+      <rect x="48" y="302" width="240" height="44" rx="9" fill="#eef1f5" stroke="#d4dae2" stroke-width="1.4"/>
+      <text x="64" y="322" font-family="system-ui,sans-serif" font-size="13" font-weight="700" fill="#15181f">4 · 물병 제외</text>
+      <text x="64" y="339" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">투명 plastic · 빛 투과 patch 혼입</text>
+      <rect x="300" y="302" width="240" height="44" rx="9" fill="#eef1f5" stroke="#d4dae2" stroke-width="1.4"/>
+      <text x="316" y="322" font-family="system-ui,sans-serif" font-size="13" font-weight="700" fill="#15181f">5 · 언노운 우회</text>
+      <text x="316" y="339" font-family="system-ui,sans-serif" font-size="11" fill="#5b6472">classifier가 사전 거름</text>
     </g>
 
     <!-- ===== bottom-right: 2-stage enabled gate ===== -->
     <g>
-      <rect x="701" y="294" width="531" height="60" rx="10" fill="#fdecea" stroke="#c0392b" stroke-width="1.4"/>
-      <text x="720" y="316" font-family="system-ui,sans-serif" font-size="13" font-weight="700" fill="#c0392b">2단 enabled 게이트</text>
-      <text x="720" y="335" font-family="system-ui,sans-serif" font-size="11.5" fill="#15181f"><tspan font-family="ui-monospace,monospace">최상위 enabled:false</tspan> = 전체 kill-switch · <tspan font-family="ui-monospace,monospace">per-class enabled:false</tspan> = 해당 클래스만 스킵</text>
-      <text x="720" y="349" font-family="system-ui,sans-serif" font-size="11" fill="#c0392b">알 수 없는 <tspan font-family="ui-monospace,monospace">type</tspan> = ValueError hard-fail</text>
+      <rect x="701" y="288" width="531" height="60" rx="10" fill="#fdecea" stroke="#c0392b" stroke-width="1.4"/>
+      <text x="720" y="310" font-family="system-ui,sans-serif" font-size="13" font-weight="700" fill="#c0392b">2단 enabled 게이트</text>
+      <text x="720" y="329" font-family="system-ui,sans-serif" font-size="11.5" fill="#15181f"><tspan font-family="ui-monospace,monospace">최상위 enabled:false</tspan> = 전체 kill-switch · <tspan font-family="ui-monospace,monospace">per-class enabled:false</tspan> = 해당 클래스만 스킵</text>
+      <text x="720" y="343" font-family="system-ui,sans-serif" font-size="11" fill="#c0392b">알 수 없는 <tspan font-family="ui-monospace,monospace">type</tspan> = ValueError hard-fail</text>
     </g>
   </svg>
 </section>
@@ -760,11 +755,11 @@ svg{max-width:100%;height:auto;display:block}
   <h1 class="s-title">PatchCore-lite <span class="muted">— 정상 patch memory bank</span></h1>
   <div class="s-kicker">정상 객체 중간 layer(<span class="mono">L12</span>) patch feature 뱅크 → 테스트 patch별 최근접 L2 거리 → aggregate → <span class="mono">score &gt; τ</span></div>
 
-  <div class="row" style="margin-top:14px; align-items:flex-start; gap:18px;">
+  <div class="row" style="margin-top:14px; align-items:stretch; gap:18px;">
 
     <!-- LEFT 60% : flow diagram -->
-    <div class="col" style="flex:0 0 60%; max-width:60%;">
-      <svg viewBox="0 0 720 430" width="100%" height="430" role="img" aria-label="PatchCore-lite 연산 흐름">
+    <div class="col" style="flex:0 0 60%; max-width:60%; justify-content:flex-start; gap:0;">
+      <svg viewBox="0 0 720 430" width="100%" height="auto" preserveAspectRatio="xMidYMin meet" role="img" aria-label="PatchCore-lite 연산 흐름" style="display:block;">
         <defs>
           <marker id="ar7" markerWidth="9" markerHeight="9" refX="7" refY="4.2" orient="auto">
             <path d="M1,1 L7.5,4.2 L1,7.4 Z" fill="#5b6472"/>
@@ -844,13 +839,12 @@ svg{max-width:100%;height:auto;display:block}
         <text x="543" y="306" text-anchor="middle" font-size="11" fill="#b45309">결함 위치 판정</text>
 
         <!-- branch: score -> heatmap -->
-        <path d="M494,159 L470,159 L470,300 L300,300 L300,300" fill="none" stroke="#5b6472" stroke-width="1.4"/>
-        <path d="M470,300 L312,300" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ar7)"/>
+        <path d="M494,159 L470,159 L470,300 L312,300" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ar7)"/>
         <!-- heatmap thumbnail (monochrome 16x16-ish grid) -->
         <g>
           <rect x="150" y="262" width="160" height="76" rx="9" fill="#ffffff" stroke="#475569" stroke-width="1.4"/>
           <text x="230" y="280" text-anchor="middle" font-size="12" fill="#15181f" font-weight="600">heatmap</text>
-          <!-- mini grid 8x4 monochrome scatter -->
+          <!-- mini grid monochrome scatter -->
           <g>
             <rect x="166" y="290" width="11" height="11" fill="#eef1f5"/><rect x="178" y="290" width="11" height="11" fill="#d4dae2"/><rect x="190" y="290" width="11" height="11" fill="#eef1f5"/><rect x="202" y="290" width="11" height="11" fill="#b45309" opacity="0.85"/><rect x="214" y="290" width="11" height="11" fill="#5b6472"/><rect x="226" y="290" width="11" height="11" fill="#eef1f5"/><rect x="238" y="290" width="11" height="11" fill="#d4dae2"/><rect x="250" y="290" width="11" height="11" fill="#eef1f5"/><rect x="262" y="290" width="11" height="11" fill="#eef1f5"/><rect x="274" y="290" width="11" height="11" fill="#d4dae2"/>
             <rect x="166" y="302" width="11" height="11" fill="#d4dae2"/><rect x="178" y="302" width="11" height="11" fill="#eef1f5"/><rect x="190" y="302" width="11" height="11" fill="#5b6472"/><rect x="202" y="302" width="11" height="11" fill="#b45309"/><rect x="214" y="302" width="11" height="11" fill="#b45309" opacity="0.85"/><rect x="226" y="302" width="11" height="11" fill="#d4dae2"/><rect x="238" y="302" width="11" height="11" fill="#eef1f5"/><rect x="250" y="302" width="11" height="11" fill="#eef1f5"/><rect x="262" y="302" width="11" height="11" fill="#d4dae2"/><rect x="274" y="302" width="11" height="11" fill="#eef1f5"/>
@@ -869,32 +863,32 @@ svg{max-width:100%;height:auto;display:block}
     </div>
 
     <!-- RIGHT 40% : aggregate branches + layer guard -->
-    <div class="col" style="flex:0 0 38%; max-width:38%; gap:12px;">
-      <div class="box box--def">
+    <div class="col" style="flex:0 0 38%; max-width:38%; gap:16px; justify-content:flex-start;">
+      <div class="box box--def" style="padding:16px 18px;">
         <div class="s-eyebrow" style="color:#b45309;">aggregate 3분기</div>
-        <div class="row" style="gap:8px; margin-top:8px;">
+        <div class="row" style="gap:10px; margin-top:12px; align-items:flex-start;">
           <span class="pill mono">max</span>
-          <span class="muted" style="font-size:12.5px;">단일 hot patch 민감 · 소형 결함 유리 · <span class="hl">현행</span></span>
+          <span class="muted" style="font-size:12.5px; line-height:1.5;">단일 hot patch 민감 · 소형 결함 유리 · <span class="hl">현행</span></span>
         </div>
-        <div class="divider"></div>
-        <div class="row" style="gap:8px;">
+        <div class="divider" style="margin:13px 0;"></div>
+        <div class="row" style="gap:10px; align-items:flex-start;">
           <span class="pill mono">top_k_mean</span>
-          <span class="muted" style="font-size:12.5px;"><span class="mono">k=4</span> · outlier 완화</span>
+          <span class="muted" style="font-size:12.5px; line-height:1.5;"><span class="mono">k=4</span> · outlier 완화</span>
         </div>
-        <div class="divider"></div>
-        <div class="row" style="gap:8px;">
+        <div class="divider" style="margin:13px 0;"></div>
+        <div class="row" style="gap:10px; align-items:flex-start;">
           <span class="pill mono">top_p_mean</span>
-          <span class="muted" style="font-size:12.5px;"><span class="mono">else</span> default · <span class="hl">오타 silent fallback 주의</span></span>
+          <span class="muted" style="font-size:12.5px; line-height:1.5;"><span class="mono">else</span> default · <span class="hl">오타 silent fallback 주의</span></span>
         </div>
       </div>
 
-      <div class="box box--warn">
+      <div class="box box--warn" style="padding:16px 18px;">
         <div class="s-eyebrow" style="color:#c0392b;">layer 가드</div>
-        <div style="font-size:13px; color:#15181f; margin-top:6px; line-height:1.5;">
+        <div style="font-size:13px; color:#15181f; margin-top:8px; line-height:1.55;">
           bank <span class="mono">dinov2_layer</span> ≠ config <span class="mono">dinov2_layer</span>
           → 즉시 <span class="mono" style="color:#c0392b;">ValueError</span>
         </div>
-        <div class="muted" style="font-size:12px; margin-top:6px;">조용한 오판 차단 · 무결함 학습(결함 라벨 0장)</div>
+        <div class="muted" style="font-size:12px; margin-top:8px; line-height:1.5;">조용한 오판 차단 · 무결함 학습(결함 라벨 0장)</div>
       </div>
     </div>
   </div>
@@ -907,14 +901,14 @@ svg{max-width:100%;height:auto;display:block}
   <div style="position:absolute;left:64px;top:36px;right:64px;">
     <div class="s-eyebrow" style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#b45309;font-weight:700;">Defect · Cascade</div>
     <div class="s-title" style="font-size:30px;font-weight:800;line-height:1.1;margin-top:6px;color:#15181f;">하리보 결함판정 — 4신호 <span style="color:#b45309;">다수결 voting</span></div>
-    <div class="s-kicker" style="font-size:17px;color:#5b6472;margin-top:5px;font-weight:500;">deformable 표면(정상 구겨짐 vs 찢어짐)은 PatchCore 단독 false reject → 독립 4신호 <span style="color:#15181f;font-weight:700;">votes ≥ 2</span> &nbsp;<span style="color:#c0392b;font-weight:700;">(AND-gate 아님)</span></div>
+    <div class="s-kicker" style="font-size:17px;color:#5b6472;margin-top:5px;font-weight:500;line-height:1.4;">deformable 표면(정상 구겨짐 vs 찢어짐)은 PatchCore 단독 false reject → 독립 4신호 <span style="color:#15181f;font-weight:700;">votes ≥ 2</span> &nbsp;<span style="color:#c0392b;font-weight:700;">(AND-gate 아님)</span></div>
   </div>
   <div class="s-num" style="position:absolute;right:64px;top:40px;font-size:13px;color:#5b6472;font-weight:600;">08</div>
 
-  <!-- ===== 본문영역 (120 ~ 660) ===== -->
+  <!-- ===== 본문영역 (136 ~ 494) ===== -->
 
   <!-- 4 신호 노드 가로 배열 + voting + is_defect : 메인 SVG -->
-  <svg width="1152" height="358" viewBox="0 0 1152 358" style="position:absolute;left:64px;top:136px;" font-family="'Inter','Segoe UI',system-ui,sans-serif">
+  <svg width="1152" height="358" viewBox="0 0 1152 358" style="position:absolute;left:64px;top:140px;" font-family="'Inter','Segoe UI',system-ui,sans-serif">
     <defs>
       <marker id="ah8" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M0 0 L10 5 L0 10 z" fill="#5b6472"/>
@@ -928,7 +922,7 @@ svg{max-width:100%;height:auto;display:block}
     <text x="8" y="16" font-size="11.5" fill="#5b6472" font-weight="700" letter-spacing=".06em">4 독립 신호 · 각 자기 임계로 1표 산출</text>
 
     <!-- ===== 4 신호 노드 (등간격) =====
-         노드폭 232, gap → x 중심: 132 / 396 / 660 / 924 -->
+         노드폭 224, gap 40 → x 중심: 132 / 396 / 660 / 924 -->
 
     <!-- s1 -->
     <g>
@@ -968,10 +962,10 @@ svg{max-width:100%;height:auto;display:block}
     </g>
 
     <!-- ===== 4노드 → ∑ voting 수렴 화살표 ===== -->
-    <!-- 합산 노드 중심: x=576, y=212 -->
+    <!-- 합산 노드 중심: x=576, y=222 / 박스 top=190 -->
     <path d="M132 126 L132 158 Q132 168 142 168 L420 168 Q470 168 490 184" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah8)"/>
-    <path d="M396 126 L396 162 Q396 172 420 176 L498 190" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah8)"/>
-    <path d="M660 126 L660 162 Q660 172 636 176 L654 190" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah8)"/>
+    <path d="M396 126 L396 162 Q396 172 420 176 L498 188" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah8)"/>
+    <path d="M660 126 L660 162 Q660 172 636 176 L654 188" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah8)"/>
     <path d="M924 126 L924 158 Q924 168 914 168 L716 168 Q666 168 662 184" fill="none" stroke="#5b6472" stroke-width="1.4" marker-end="url(#ah8)"/>
 
     <!-- ===== ∑ voting 합산 노드 (ink) ===== -->
@@ -997,7 +991,7 @@ svg{max-width:100%;height:auto;display:block}
       <text x="249" y="235" font-size="11" fill="#5b6472" text-anchor="middle">단위 상이 → 로깅용, 판정 미사용</text>
     </g>
 
-    <!-- 하단 강건성 칩 2개 -->
+    <!-- 하단 강건성 칩 2개 (gap 16, 폭 동일 500) -->
     <g>
       <rect x="20" y="300" width="500" height="46" rx="9" fill="#e9f6f0" stroke="#047857" stroke-width="1.4"/>
       <circle cx="46" cy="323" r="6" fill="#047857"/>
@@ -1012,14 +1006,11 @@ svg{max-width:100%;height:auto;display:block}
     </g>
   </svg>
 
-  <!-- ===== 우측 상단 box--warn : 다수결 ≠ AND-gate ===== -->
-  <div class="box box--warn" style="position:absolute;right:64px;top:140px;width:0;height:0;"></div>
-
-  <!-- ===== 푸터 ===== -->
-  <div class="s-foot" style="position:absolute;left:64px;bottom:24px;font-size:11.5px;color:#5b6472;">
-    Cascade · class 0 haribo · DINOv2-large L12 · 코드 주석 'AND gate'는 오기 — 실제는 다수결 voting
+  <!-- ===== 푸터 (공유 .s-foot 그리드: bottom 18, border-top, space-between) ===== -->
+  <div class="s-foot" style="position:absolute;left:64px;right:64px;bottom:18px;font-size:11.5px;color:#5b6472;border-top:1px solid #d4dae2;padding-top:8px;display:flex;justify-content:space-between;align-items:baseline;gap:16px;">
+    <span style="flex:1 1 auto;min-width:0;">Cascade · class 0 haribo · DINOv2-large L12 · 코드 주석 'AND gate'는 오기 — 실제는 다수결 voting</span>
+    <span style="flex:0 0 auto;font-family:ui-monospace,Menlo,monospace;white-space:nowrap;">votes = 𝟙[s1&gt;8.6]+𝟙[s2&gt;0.10]+𝟙[s3&gt;0.05]+𝟙[s4&gt;1.8]</span>
   </div>
-  <div style="position:absolute;right:64px;bottom:24px;font-size:11.5px;color:#5b6472;font-family:ui-monospace,Menlo,monospace;">votes = 𝟙[s1&gt;8.6]+𝟙[s2&gt;0.10]+𝟙[s3&gt;0.05]+𝟙[s4&gt;1.8]</div>
 
 </section>
 <section class="slide" id="slide-9">
@@ -1029,15 +1020,15 @@ svg{max-width:100%;height:auto;display:block}
   <p class="s-kicker">물성에 따른 3전략 분기 · 젤리껌(mango)은 설계는 fusion, <span class="hl">운영은 plain PatchCore</span>로 회귀</p>
 
   <!-- ===================== 상단: 3전략 비교 grid3 ===================== -->
-  <div class="grid3" style="margin-top:14px; align-items:stretch;">
+  <div class="grid3" style="margin-top:38px; align-items:stretch;">
 
     <!-- Card 1: PatchCore-lite -->
     <div class="box box--def" style="display:flex; flex-direction:column; padding:0; overflow:hidden;">
-      <div style="background:#fdf3e3; border-bottom:1.4px solid #b45309; padding:9px 14px; display:flex; align-items:center; justify-content:space-between;">
+      <div style="background:#fdf3e3; border-bottom:1.4px solid #b45309; padding:12px 16px; display:flex; align-items:center; justify-content:space-between;">
         <span style="font-weight:700; color:#b45309; font-size:14.5px;">PatchCore-lite</span>
         <span class="chip" style="background:#fff; color:#b45309; border:1.4px solid #b45309;">rigid</span>
       </div>
-      <div style="padding:12px 14px; display:flex; flex-direction:column; gap:9px;">
+      <div style="padding:18px 16px 20px; display:flex; flex-direction:column; gap:18px;">
         <div class="row" style="gap:8px; align-items:baseline;">
           <span class="muted" style="font-size:12px; width:52px;">신호 수</span>
           <span class="mono" style="font-size:13px;">1 · patch L2</span>
@@ -1046,17 +1037,17 @@ svg{max-width:100%;height:auto;display:block}
           <span class="muted" style="font-size:12px; width:52px;">대상 물성</span>
           <span style="font-size:13px; color:#15181f;">필통 · 메탈 · 젤리(운영)</span>
         </div>
-        <p class="muted" style="font-size:12px; margin:2px 0 0; line-height:1.5;">정상 patch memory bank 최근접 L2 → max aggregate → τ.</p>
+        <p class="muted" style="font-size:12px; margin:4px 0 0; line-height:1.55;">정상 patch memory bank 최근접 L2 → max aggregate → τ.</p>
       </div>
     </div>
 
     <!-- Card 2: Cascade -->
     <div class="box box--def" style="display:flex; flex-direction:column; padding:0; overflow:hidden;">
-      <div style="background:#fdf3e3; border-bottom:1.4px solid #b45309; padding:9px 14px; display:flex; align-items:center; justify-content:space-between;">
+      <div style="background:#fdf3e3; border-bottom:1.4px solid #b45309; padding:12px 16px; display:flex; align-items:center; justify-content:space-between;">
         <span style="font-weight:700; color:#b45309; font-size:14.5px;">Cascade</span>
         <span class="chip" style="background:#fff; color:#b45309; border:1.4px solid #b45309;">deformable</span>
       </div>
-      <div style="padding:12px 14px; display:flex; flex-direction:column; gap:9px;">
+      <div style="padding:18px 16px 20px; display:flex; flex-direction:column; gap:18px;">
         <div class="row" style="gap:8px; align-items:baseline;">
           <span class="muted" style="font-size:12px; width:52px;">신호 수</span>
           <span class="mono" style="font-size:13px;">4 · 다수결 ≥2</span>
@@ -1065,17 +1056,17 @@ svg{max-width:100%;height:auto;display:block}
           <span class="muted" style="font-size:12px; width:52px;">대상 물성</span>
           <span style="font-size:13px; color:#15181f;">하리보(haribo)</span>
         </div>
-        <p class="muted" style="font-size:12px; margin:2px 0 0; line-height:1.5;">PatchCore·color·Laplacian·topology 투표(AND 아님).</p>
+        <p class="muted" style="font-size:12px; margin:4px 0 0; line-height:1.55;">PatchCore·color·Laplacian·topology 투표(AND 아님).</p>
       </div>
     </div>
 
     <!-- Card 3: Weighted Fusion (점선 = 설계만) -->
     <div class="box box--def" style="display:flex; flex-direction:column; padding:0; overflow:hidden; border-style:dashed; border-color:#b45309;">
-      <div style="background:#fdf3e3; border-bottom:1.4px dashed #b45309; padding:9px 14px; display:flex; align-items:center; justify-content:space-between;">
+      <div style="background:#fdf3e3; border-bottom:1.4px dashed #b45309; padding:12px 16px; display:flex; align-items:center; justify-content:space-between;">
         <span style="font-weight:700; color:#b45309; font-size:14.5px;">Weighted Fusion</span>
         <span class="chip" style="background:#fff; color:#b45309; border:1.4px dashed #b45309;">설계만</span>
       </div>
-      <div style="padding:12px 14px; display:flex; flex-direction:column; gap:9px;">
+      <div style="padding:18px 16px 20px; display:flex; flex-direction:column; gap:18px;">
         <div class="row" style="gap:8px; align-items:baseline;">
           <span class="muted" style="font-size:12px; width:52px;">신호 수</span>
           <span class="mono" style="font-size:13px;">2 · w=0.25 융합</span>
@@ -1084,13 +1075,13 @@ svg{max-width:100%;height:auto;display:block}
           <span class="muted" style="font-size:12px; width:52px;">대상 물성</span>
           <span style="font-size:13px; color:#15181f;">젤리껌(mango) · 설계</span>
         </div>
-        <p class="muted" style="font-size:12px; margin:2px 0 0; line-height:1.5;">patch 거리 + normal Laplacian z-가중 융합.</p>
+        <p class="muted" style="font-size:12px; margin:4px 0 0; line-height:1.55;">patch 거리 + normal Laplacian z-가중 융합.</p>
       </div>
     </div>
   </div>
 
   <!-- ===================== 하단 강조: 젤리껌 결정 경로 ===================== -->
-  <div class="box box--warn" style="margin-top:16px; padding:14px 18px;">
+  <div class="box box--warn" style="margin-top:40px; padding:28px 22px;">
     <div class="row" style="align-items:center; justify-content:space-between; gap:16px; flex-wrap:nowrap;">
 
       <!-- 결정 플로우 -->
@@ -1102,13 +1093,8 @@ svg{max-width:100%;height:auto;display:block}
 
         <!-- arrow + label -->
         <div style="display:flex; flex-direction:column; align-items:center; margin:0 12px;">
-          <span class="mono" style="font-size:12px; color:#c0392b; font-weight:700; margin-bottom:2px;">운에 맡김</span>
+          <span class="mono" style="font-size:12px; color:#c0392b; font-weight:700; margin-bottom:2px;">정량검증 보류</span>
           <svg width="92" height="22" viewBox="0 0 92 22" fill="none">
-            <!-- dice icon -->
-            <rect x="2" y="4" width="14" height="14" rx="3" stroke="#c0392b" stroke-width="1.4"/>
-            <circle cx="6.5" cy="8.5" r="1.1" fill="#c0392b"/>
-            <circle cx="11.5" cy="13.5" r="1.1" fill="#c0392b"/>
-            <circle cx="9"   cy="11"  r="1.1" fill="#c0392b"/>
             <!-- arrow -->
             <line x1="22" y1="11" x2="82" y2="11" stroke="#c0392b" stroke-width="1.4"/>
             <path d="M82 11 L75 7.5 L75 14.5 Z" fill="#c0392b"/>
@@ -1129,7 +1115,7 @@ svg{max-width:100%;height:auto;display:block}
     </div>
 
     <!-- 사유 2줄 -->
-    <div class="divider" style="margin:11px 0 10px;"></div>
+    <div class="divider" style="margin:22px 0 18px;"></div>
     <div class="grid2" style="gap:14px;">
       <div class="row" style="gap:8px; align-items:flex-start;">
         <span class="mono" style="color:#c0392b; font-weight:700; font-size:12.5px;">1</span>
@@ -1143,7 +1129,7 @@ svg{max-width:100%;height:auto;display:block}
   </div>
 
   <div class="s-foot">
-    <span class="mono">DINOv2-large · L12 통일</span> · 젤리껌 = enabled:true 작동하나 TPR 정량검증 없음(운에 맡김) · 보수적 τ=max(F1-best, 정상 p99.5)로 정상 구겨짐 오거부 방지
+    <span class="mono">DINOv2-large · L12 통일</span> · 젤리껌 = enabled:true 작동하나 TPR 정량검증 없음(정량검증 보류) · 보수적 τ=max(F1-best, 정상 p99.5)로 정상 구겨짐 오거부 방지
   </div>
 </section>
 <section class="slide" id="slide-10">
@@ -1244,7 +1230,7 @@ svg{max-width:100%;height:auto;display:block}
     </div>
 
     <!-- ========================= RIGHT 45% : cal + warn boxes ========================= -->
-    <div class="col" style="min-width:0; display:flex; flex-direction:column; gap:16px;">
+    <div class="col" style="min-width:0; display:flex; flex-direction:column; gap:16px; justify-content:space-between;">
 
       <!-- LOO ROC calibration box -->
       <div class="box box--cal" style="border-radius:10px;">
@@ -1303,98 +1289,98 @@ svg{max-width:100%;height:auto;display:block}
   <p class="s-foot">오프라인: <span class="mono">build_all_defect_l12.sh</span> → 뱅크4(large·L12) + color GMM + 임계튜닝 → <span class="mono">defect_thresholds.json</span>이 DefectRegistry placeholder를 로드 시 자동 덮어씀 · 불일치/누락은 fail-loud.</p>
 </section>
 <section class="slide" id="slide-11">
-  <div style="position:absolute;left:64px;right:64px;top:40px;">
+  <div style="position:absolute;left:64px;right:64px;top:36px;">
     <div class="s-eyebrow" style="font-size:12px;letter-spacing:.14em;color:#5b6472;text-transform:uppercase;">현황 / 정직성</div>
-    <div class="s-title" style="font-size:30px;line-height:1.12;color:#15181f;font-weight:800;margin-top:6px;">현황과 정직성 — 무엇이 검증되었고 무엇이 남았나</div>
-    <div class="s-kicker" style="font-size:17px;color:#5b6472;margin-top:4px;">전 클래스 DINOv2-large · L12 통일 운영 현황과 검증 경계의 정직한 명시</div>
+    <div class="s-title" style="font-size:29px;line-height:1.12;color:#15181f;font-weight:800;margin-top:6px;">현황과 정직성 — 무엇이 검증되었고 무엇이 남았나</div>
+    <div class="s-kicker" style="font-size:16px;color:#5b6472;margin-top:4px;">전 클래스 DINOv2-large · L12 통일 운영 현황과 검증 경계의 정직한 명시</div>
   </div>
-  <div class="s-num" style="position:absolute;right:64px;top:44px;font-size:13px;color:#5b6472;font-family:ui-monospace,Menlo,monospace;">11</div>
+  <div class="s-num" style="position:absolute;right:64px;top:40px;font-size:13px;color:#5b6472;font-family:ui-monospace,Menlo,monospace;">11</div>
 
-  <div style="position:absolute;left:64px;right:64px;top:138px;height:402px;display:grid;grid-template-columns:1fr 1fr;gap:28px;">
+  <div style="position:absolute;left:64px;right:64px;top:150px;height:466px;display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
 
     <!-- LEFT: operating status table -->
     <div class="box" style="border:1.4px solid #d4dae2;border-radius:10px;background:#ffffff;padding:0;overflow:hidden;">
-      <div style="padding:12px 16px 10px;border-bottom:1.4px solid #d4dae2;">
+      <div style="padding:11px 16px 9px;border-bottom:1.4px solid #d4dae2;">
         <div style="font-size:14px;font-weight:700;color:#15181f;">클래스별 운영 현황</div>
-        <div style="font-size:12.5px;color:#5b6472;margin-top:2px;">backbone: DINOv2-large · 전 클래스 L12 통일</div>
+        <div style="font-size:12px;color:#5b6472;margin-top:2px;">backbone: DINOv2-large · 전 클래스 L12 통일</div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12.5px;color:#15181f;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;color:#15181f;table-layout:fixed;">
         <thead>
           <tr style="background:#eef0fc;color:#4338ca;">
-            <th style="text-align:left;padding:8px 10px;font-weight:700;font-size:12.5px;">id</th>
-            <th style="text-align:left;padding:8px 6px;font-weight:700;font-size:12.5px;">클래스</th>
-            <th style="text-align:left;padding:8px 6px;font-weight:700;font-size:12.5px;">detector</th>
-            <th style="text-align:center;padding:8px 4px;font-weight:700;font-size:12.5px;">L</th>
-            <th style="text-align:center;padding:8px 4px;font-weight:700;font-size:12.5px;">on</th>
-            <th style="text-align:right;padding:8px 10px;font-weight:700;font-size:12.5px;">AUROC</th>
+            <th style="text-align:left;padding:7px 10px;font-weight:700;font-size:12px;width:9%;">id</th>
+            <th style="text-align:left;padding:7px 6px;font-weight:700;font-size:12px;width:26%;">클래스</th>
+            <th style="text-align:left;padding:7px 6px;font-weight:700;font-size:12px;width:33%;">detector</th>
+            <th style="text-align:center;padding:7px 4px;font-weight:700;font-size:12px;width:8%;">L</th>
+            <th style="text-align:center;padding:7px 4px;font-weight:700;font-size:12px;width:9%;">on</th>
+            <th style="text-align:right;padding:7px 10px;font-weight:700;font-size:12px;width:15%;">AUROC</th>
           </tr>
         </thead>
         <tbody>
           <tr style="border-top:1.4px solid #d4dae2;">
-            <td style="padding:10px;font-family:ui-monospace,monospace;color:#5b6472;">0</td>
-            <td style="padding:10px 6px;">하리보</td>
-            <td style="padding:10px 6px;">Cascade <span style="color:#5b6472;">(≥2/4)</span></td>
-            <td style="padding:10px 4px;text-align:center;font-family:ui-monospace,monospace;">12</td>
-            <td style="padding:10px 4px;text-align:center;"><span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:5px;background:#e9f6f0;color:#047857;font-size:11px;">&#10003;</span></td>
-            <td style="padding:10px;text-align:right;font-family:ui-monospace,monospace;">0.929</td>
+            <td style="padding:8px 10px;font-family:ui-monospace,monospace;color:#5b6472;">0</td>
+            <td style="padding:8px 6px;">하리보</td>
+            <td style="padding:8px 6px;">Cascade <span style="color:#5b6472;">(≥2/4)</span></td>
+            <td style="padding:8px 4px;text-align:center;font-family:ui-monospace,monospace;">12</td>
+            <td style="padding:8px 4px;text-align:center;"><span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:5px;background:#e9f6f0;color:#047857;font-size:11px;">&#10003;</span></td>
+            <td style="padding:8px 10px;text-align:right;font-family:ui-monospace,monospace;">0.929</td>
           </tr>
           <tr style="border-top:1.4px solid #d4dae2;background:#fdf3e3;">
-            <td style="padding:10px;font-family:ui-monospace,monospace;color:#5b6472;">1</td>
-            <td style="padding:10px 6px;">젤리껌<span style="color:#5b6472;font-size:11px;"> (mango)</span></td>
-            <td style="padding:10px 6px;">plain PatchCore
-              <svg width="13" height="13" viewBox="0 0 13 13" style="vertical-align:-1px;margin-left:2px;" aria-label="운에 맡김"><rect x="1" y="1" width="11" height="11" rx="3" fill="none" stroke="#b45309" stroke-width="1.4"/><circle cx="4" cy="4" r="1.1" fill="#b45309"/><circle cx="9" cy="9" r="1.1" fill="#b45309"/><circle cx="9" cy="4" r="1.1" fill="#b45309"/><circle cx="4" cy="9" r="1.1" fill="#b45309"/></svg>
+            <td style="padding:8px 10px;font-family:ui-monospace,monospace;color:#5b6472;">1</td>
+            <td style="padding:8px 6px;">젤리껌<span style="color:#5b6472;font-size:11px;"> (mango)</span></td>
+            <td style="padding:8px 6px;">plain PatchCore
+              
             </td>
-            <td style="padding:10px 4px;text-align:center;font-family:ui-monospace,monospace;">12</td>
-            <td style="padding:10px 4px;text-align:center;"><span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:5px;background:#e9f6f0;color:#047857;font-size:11px;">&#10003;</span></td>
-            <td style="padding:10px;text-align:right;font-family:ui-monospace,monospace;">0.880<span style="display:block;font-size:10px;color:#b45309;">TPR 미검증</span></td>
+            <td style="padding:8px 4px;text-align:center;font-family:ui-monospace,monospace;">12</td>
+            <td style="padding:8px 4px;text-align:center;"><span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:5px;background:#e9f6f0;color:#047857;font-size:11px;">&#10003;</span></td>
+            <td style="padding:8px 10px;text-align:right;font-family:ui-monospace,monospace;">0.880<span style="display:block;font-size:10px;color:#b45309;">TPR 미검증</span></td>
           </tr>
           <tr style="border-top:1.4px solid #d4dae2;">
-            <td style="padding:10px;font-family:ui-monospace,monospace;color:#5b6472;">2</td>
-            <td style="padding:10px 6px;">필통</td>
-            <td style="padding:10px 6px;">PatchCore <span style="color:#5b6472;">(max)</span></td>
-            <td style="padding:10px 4px;text-align:center;font-family:ui-monospace,monospace;">12</td>
-            <td style="padding:10px 4px;text-align:center;"><span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:5px;background:#e9f6f0;color:#047857;font-size:11px;">&#10003;</span></td>
-            <td style="padding:10px;text-align:right;font-family:ui-monospace,monospace;">0.986</td>
+            <td style="padding:8px 10px;font-family:ui-monospace,monospace;color:#5b6472;">2</td>
+            <td style="padding:8px 6px;">필통</td>
+            <td style="padding:8px 6px;">PatchCore <span style="color:#5b6472;">(max)</span></td>
+            <td style="padding:8px 4px;text-align:center;font-family:ui-monospace,monospace;">12</td>
+            <td style="padding:8px 4px;text-align:center;"><span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:5px;background:#e9f6f0;color:#047857;font-size:11px;">&#10003;</span></td>
+            <td style="padding:8px 10px;text-align:right;font-family:ui-monospace,monospace;">0.986</td>
           </tr>
           <tr style="border-top:1.4px solid #d4dae2;">
-            <td style="padding:10px;font-family:ui-monospace,monospace;color:#5b6472;">3</td>
-            <td style="padding:10px 6px;">메탈케이스</td>
-            <td style="padding:10px 6px;">PatchCore <span style="color:#5b6472;">(max)</span></td>
-            <td style="padding:10px 4px;text-align:center;font-family:ui-monospace,monospace;">12</td>
-            <td style="padding:10px 4px;text-align:center;"><span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:5px;background:#e9f6f0;color:#047857;font-size:11px;">&#10003;</span></td>
-            <td style="padding:10px;text-align:right;font-family:ui-monospace,monospace;">0.998</td>
+            <td style="padding:8px 10px;font-family:ui-monospace,monospace;color:#5b6472;">3</td>
+            <td style="padding:8px 6px;">메탈케이스</td>
+            <td style="padding:8px 6px;">PatchCore <span style="color:#5b6472;">(max)</span></td>
+            <td style="padding:8px 4px;text-align:center;font-family:ui-monospace,monospace;">12</td>
+            <td style="padding:8px 4px;text-align:center;"><span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:5px;background:#e9f6f0;color:#047857;font-size:11px;">&#10003;</span></td>
+            <td style="padding:8px 10px;text-align:right;font-family:ui-monospace,monospace;">0.998</td>
           </tr>
           <tr style="border-top:1.4px solid #d4dae2;color:#5b6472;">
-            <td style="padding:10px;font-family:ui-monospace,monospace;">4·5</td>
-            <td style="padding:10px 6px;">물병 · 언노운</td>
-            <td style="padding:10px 6px;" colspan="3">제외 · 우회</td>
-            <td style="padding:10px;text-align:right;">—</td>
+            <td style="padding:8px 10px;font-family:ui-monospace,monospace;">4·5</td>
+            <td style="padding:8px 6px;">물병 · 언노운</td>
+            <td style="padding:8px 6px;" colspan="3">제외 · 우회</td>
+            <td style="padding:8px 10px;text-align:right;">—</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <!-- RIGHT: honesty notes -->
-    <div class="box box--warn" style="border:1.4px solid #c0392b;border-radius:10px;background:#fdecea;padding:14px 16px;display:flex;flex-direction:column;">
+    <div class="box box--warn" style="border:1.4px solid #c0392b;border-radius:10px;background:#fdecea;padding:13px 16px;display:flex;flex-direction:column;">
       <div style="font-size:14px;font-weight:700;color:#c0392b;display:flex;align-items:center;gap:7px;">
         <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 1.6 14.6 13.4H1.4Z" fill="none" stroke="#c0392b" stroke-width="1.4" stroke-linejoin="round"/><line x1="8" y1="6" x2="8" y2="9.6" stroke="#c0392b" stroke-width="1.4"/><circle cx="8" cy="11.5" r="0.9" fill="#c0392b"/></svg>
         정직성 노트
       </div>
-      <ol style="margin:10px 0 0;padding-left:20px;font-size:12.5px;line-height:1.32;color:#15181f;">
-        <li style="margin-bottom:7px;"><b>결함 → 파이프라인 배선 미완</b> (판정 설계만 완료, pick_n_place 미연결).</li>
-        <li style="margin-bottom:7px;"><b>mango TPR 미검증</b> — plain PatchCore "운에 맡김", 정량 TPR 없음.</li>
-        <li style="margin-bottom:7px;"><b>수치는 base·합성·LOO·단일 seed 기준</b> → 실물 재검증 대상.</li>
-        <li style="margin-bottom:7px;"><b>layer 선택은 base ablation 근거</b> (메탈 L7 등) + large는 L12 통일, 클래스별 sweep 후속 (예측 메탈 L14).</li>
-        <li style="margin-bottom:7px;"><b>Laplacian TPR 합성검증 불가</b> — z-상수 무효로 plain 전환.</li>
+      <ol style="margin:9px 0 0;padding-left:19px;font-size:12px;line-height:1.3;color:#15181f;">
+        <li style="margin-bottom:6px;"><b>결함 → 파이프라인 배선 미완</b> (판정 설계만 완료, pick_n_place 미연결).</li>
+        <li style="margin-bottom:6px;"><b>mango TPR 미검증</b> — plain PatchCore "정량검증 보류", 정량 TPR 없음.</li>
+        <li style="margin-bottom:6px;"><b>수치는 base·합성·LOO·단일 seed 기준</b> → 실물 재검증 대상.</li>
+        <li style="margin-bottom:6px;"><b>layer 선택은 base ablation 근거</b> (메탈 L7 등) + large는 L12 통일, 클래스별 sweep 후속 (예측 메탈 L14).</li>
+        <li style="margin-bottom:6px;"><b>Laplacian TPR 합성검증 불가</b> — z-상수 무효로 plain 전환.</li>
         <li style="margin-bottom:0;"><b>합성 결함의 도메인 갭</b> — 실물 분포와 차이 잔존.</li>
       </ol>
     </div>
   </div>
 
   <!-- bottom caption divider -->
-  <div style="position:absolute;left:64px;right:64px;bottom:46px;">
+  <div style="position:absolute;left:64px;right:64px;bottom:30px;">
     <div class="divider" style="height:1.4px;background:#d4dae2;"></div>
-    <div class="muted" style="font-size:12.5px;color:#5b6472;margin-top:9px;letter-spacing:.01em;">
+    <div class="muted" style="font-size:12px;color:#5b6472;margin-top:8px;letter-spacing:.01em;">
       <b style="color:#15181f;">수치 기준</b> &nbsp;·&nbsp; 모든 수치 base · 합성 · LOO · 단일 seed — 실물 재검증 전 잠정
     </div>
   </div>
