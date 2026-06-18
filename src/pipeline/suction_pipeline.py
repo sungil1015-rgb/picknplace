@@ -20,9 +20,9 @@ from src.utils.depth import median_valid_depth_at_point, split_surface_by_depth_
 from src.utils.mask import largest_component_mask, mask_center_point
 from src.utils.normal_surface import (
     compact_surface_attempt_debug,
-    clustered_normal_surface_candidates,
     surface_center_from_method,
 )
+from src.utils.normal_kmeans import kmeans_normal_surface_candidates
 from src.utils.suction_evaluation import (
     normal_z_score,
     suction_area_coverage,
@@ -60,7 +60,16 @@ class SuctionPipeline:
             for class_index, strategy in config.suction_strategy_by_class.items()
         }
         self.normal_surface_enabled = bool(config.normal_surface_enabled)
-        self.surface_angle_threshold_deg = float(config.surface_angle_threshold_deg)
+        self.normal_surface_max_robot_z_tilt_deg = float(config.normal_surface_max_robot_z_tilt_deg)
+        self.normal_surface_directional_tilt_enabled = bool(config.normal_surface_directional_tilt_enabled)
+        self.normal_surface_directional_tilt_allowed_robot_xy = tuple(config.normal_surface_directional_tilt_allowed_robot_xy)
+        self.normal_surface_directional_tilt_min_tilt_deg = float(config.normal_surface_directional_tilt_min_tilt_deg)
+        self.normal_surface_directional_tilt_min_allowed_dot = float(config.normal_surface_directional_tilt_min_allowed_dot)
+        self.normal_surface_kmeans_k = int(config.normal_surface_kmeans_k)
+        self.normal_surface_kmeans_merge_angle_deg = float(config.normal_surface_kmeans_merge_angle_deg)
+        self.normal_surface_kmeans_n_init = int(config.normal_surface_kmeans_n_init)
+        self.normal_surface_kmeans_max_iter = int(config.normal_surface_kmeans_max_iter)
+        self.normal_surface_kmeans_random_state = int(config.normal_surface_kmeans_random_state)
         self.surface_open_kernel_px = int(config.surface_open_kernel_px)
         self.surface_fill_holes_max_area_px = int(config.surface_fill_holes_max_area_px)
         self.surface_fill_holes_max_aspect_ratio = float(config.surface_fill_holes_max_aspect_ratio)
@@ -68,7 +77,6 @@ class SuctionPipeline:
         self.surface_rect_max_area_ratio = float(config.surface_rect_max_area_ratio)
         self.min_surface_region_area_ratio = float(config.min_surface_region_area_ratio)
         self.min_surface_region_area_px = int(config.min_surface_region_area_px)
-        self.normal_cluster_max_count = int(config.normal_cluster_max_count)
         self.class3_depth_split_enabled = bool(config.class3_depth_split_enabled)
         self.class3_depth_split_min_gap_mm = float(config.class3_depth_split_min_gap_mm)
         self.class3_depth_split_trim_low_percentile = float(config.class3_depth_split_trim_low_percentile)
@@ -417,7 +425,7 @@ class SuctionPipeline:
         if not self.normal_surface_enabled or normal_image is None:
             return None, None
 
-        return self._select_clustered_normal_surface_suction(
+        return self._select_kmeans_normal_surface_suction(
             mask,
             depth_image,
             normal_image,
@@ -426,7 +434,7 @@ class SuctionPipeline:
             instance,
         )
 
-    def _select_clustered_normal_surface_suction(
+    def _select_kmeans_normal_surface_suction(
         self,
         mask: np.ndarray,
         depth_image: np.ndarray,
@@ -437,25 +445,12 @@ class SuctionPipeline:
     ) -> tuple[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]] | None, dict[str, Any] | None]:
         attempts: list[dict[str, Any]] = []
         passed_options: list[tuple[int, int, float, SuctionFootprint | None, dict[str, Any]]] = []
-        surfaces = clustered_normal_surface_candidates(
-            normal_image,
-            mask,
-            angle_threshold_deg=self.surface_angle_threshold_deg,
-            min_area_ratio=self.min_surface_region_area_ratio,
-            min_area_px=self.min_surface_region_area_px,
-            max_clusters=self.normal_cluster_max_count,
-            open_kernel_px=self.surface_open_kernel_px,
-            fill_holes_max_area_px=self.surface_fill_holes_max_area_px,
-            fill_holes_max_aspect_ratio=self.surface_fill_holes_max_aspect_ratio,
-            center_method=self.surface_center_method,
-            rect_max_area_ratio=self.surface_rect_max_area_ratio,
-            max_candidates=self.normal_surface_candidate_max_count,
-        )
+        surfaces = self._normal_surface_candidates(normal_image, mask)
         for index, (surface, surface_debug) in enumerate(surfaces):
             surface_debug["candidate_index"] = int(index)
-            surface_debug["candidate_source"] = "normal_cluster"
+            surface_debug["candidate_source"] = "kmeans"
             if surface is None or not surface_debug.get("passed"):
-                surface_debug["suction_reject_reason"] = surface_debug.get("reason", "normal_cluster_rejected")
+                surface_debug["suction_reject_reason"] = surface_debug.get("reason", "normal_surface_rejected")
                 attempts.append(surface_debug)
                 continue
 
@@ -500,7 +495,18 @@ class SuctionPipeline:
             surface_debug["passed"] = True
             surface_debug["reason"] = None
             surface_debug["normal_z_score"] = normal_z_score(surface_debug)
-            surface_debug["robot_z_tilt_deg"] = self._robot_z_tilt_deg(surface_debug, extrinsic)
+            surface_debug.update(self._robot_z_debug(surface_debug, extrinsic))
+            if surface_debug["robot_z_tilt_deg"] > self.normal_surface_max_robot_z_tilt_deg:
+                surface_debug["passed"] = False
+                surface_debug["suction_reject_reason"] = "robot_z_tilt_too_large"
+                surface_debug["max_robot_z_tilt_deg"] = float(self.normal_surface_max_robot_z_tilt_deg)
+                attempts.append(surface_debug)
+                continue
+            if self._reject_directional_tilt(surface_debug):
+                surface_debug["passed"] = False
+                surface_debug["suction_reject_reason"] = "robot_z_tilt_opposite_direction"
+                attempts.append(surface_debug)
+                continue
             attempts.append(surface_debug)
             passed_options.append((int(u), int(v), float(depth_mm), footprint, surface_debug))
 
@@ -508,14 +514,14 @@ class SuctionPipeline:
             selected = max(
                 passed_options,
                 key=lambda item: (
-                    -float(item[4].get("robot_z_tilt_deg", 180.0)),
                     int(item[4].get("surface_area", 0)),
+                    -float(item[4].get("robot_z_tilt_deg", 180.0)),
                     -int(item[4].get("candidate_index", 0)),
                 ),
             )
             selected_debug = dict(selected[4])
             selected_debug["selected"] = True
-            selected_debug["selection_reason"] = "min_robot_z_tilt_among_clustered_surfaces"
+            selected_debug["selection_reason"] = "largest_surface_area_after_robot_z_tilt_filter"
             selected_debug["attempts"] = [
                 {
                     **compact_surface_attempt_debug(attempt),
@@ -527,10 +533,36 @@ class SuctionPipeline:
 
         return None, {
             "passed": False,
-            "reason": "no_normal_cluster_surface_passed",
-            "normal_surface_mode": "clustered",
+            "reason": "no_normal_surface_passed",
+            "normal_surface_mode": "kmeans",
             "attempts": [compact_surface_attempt_debug(attempt) for attempt in attempts],
         }
+
+    def _normal_surface_candidates(
+        self,
+        normal_image: np.ndarray,
+        mask: np.ndarray,
+    ) -> list[tuple[np.ndarray | None, dict[str, Any]]]:
+        kwargs = dict(
+            min_area_ratio=self.min_surface_region_area_ratio,
+            min_area_px=self.min_surface_region_area_px,
+            open_kernel_px=self.surface_open_kernel_px,
+            fill_holes_max_area_px=self.surface_fill_holes_max_area_px,
+            fill_holes_max_aspect_ratio=self.surface_fill_holes_max_aspect_ratio,
+            center_method=self.surface_center_method,
+            rect_max_area_ratio=self.surface_rect_max_area_ratio,
+            max_candidates=self.normal_surface_candidate_max_count,
+        )
+        return kmeans_normal_surface_candidates(
+            normal_image,
+            mask,
+            k=self.normal_surface_kmeans_k,
+            merge_angle_deg=self.normal_surface_kmeans_merge_angle_deg,
+            n_init=self.normal_surface_kmeans_n_init,
+            max_iter=self.normal_surface_kmeans_max_iter,
+            random_state=self.normal_surface_kmeans_random_state,
+            **kwargs,
+        )
 
     def _refine_class3_surface_by_depth(
         self,
@@ -599,16 +631,60 @@ class SuctionPipeline:
 
     @staticmethod
     def _robot_z_tilt_deg(surface_debug: dict[str, Any], extrinsic: np.ndarray) -> float:
+        return float(SuctionPipeline._robot_z_debug(surface_debug, extrinsic).get("robot_z_tilt_deg", 180.0))
+
+    @staticmethod
+    def _robot_z_debug(surface_debug: dict[str, Any], extrinsic: np.ndarray) -> dict[str, Any]:
         seed_normal = surface_debug.get("seed_normal")
         if not isinstance(seed_normal, list) or len(seed_normal) != 3:
-            return 180.0
+            return {"robot_z_tilt_deg": 180.0}
         normal_camera = np.asarray(seed_normal, dtype=np.float64).reshape(3)
         if np.linalg.norm(normal_camera) < 1e-9:
-            return 180.0
+            return {"robot_z_tilt_deg": 180.0}
         normal_robot = transform_normal(normal_camera, extrinsic)
         normal_robot = orient_normal_z_up(normal_robot)
-        z = float(np.clip(normal_robot[2] / max(np.linalg.norm(normal_robot), 1e-9), -1.0, 1.0))
-        return float(np.degrees(np.arccos(z)))
+        normal_robot = normal_robot / max(np.linalg.norm(normal_robot), 1e-9)
+        z = float(np.clip(normal_robot[2], -1.0, 1.0))
+        tilt_deg = float(np.degrees(np.arccos(z)))
+        xy = normal_robot[:2]
+        xy_norm = float(np.linalg.norm(xy))
+        xy_dir = xy / xy_norm if xy_norm > 1e-9 else np.asarray([0.0, 0.0], dtype=np.float64)
+        return {
+            "robot_z_tilt_deg": tilt_deg,
+            "normal_robot": [float(value) for value in normal_robot],
+            "normal_robot_xy_dir": [float(value) for value in xy_dir],
+            "normal_robot_xy_norm": xy_norm,
+        }
+
+    def _reject_directional_tilt(self, surface_debug: dict[str, Any]) -> bool:
+        if not self.normal_surface_directional_tilt_enabled:
+            return False
+        tilt = float(surface_debug.get("robot_z_tilt_deg", 180.0))
+        xy_dir = surface_debug.get("normal_robot_xy_dir")
+        if tilt < self.normal_surface_directional_tilt_min_tilt_deg:
+            surface_debug["directional_tilt_check"] = self._directional_tilt_debug(None, False, "tilt_below_threshold")
+            return False
+        if not isinstance(xy_dir, list) or len(xy_dir) != 2:
+            surface_debug["directional_tilt_check"] = self._directional_tilt_debug(None, False, "missing_robot_xy_dir")
+            return False
+        allowed = np.asarray(self.normal_surface_directional_tilt_allowed_robot_xy, dtype=np.float64)
+        current = np.asarray(xy_dir, dtype=np.float64)
+        allowed_dot = float(np.dot(current, allowed))
+        rejected = allowed_dot < self.normal_surface_directional_tilt_min_allowed_dot
+        reason = "opposite_direction" if rejected else "allowed_direction"
+        surface_debug["directional_tilt_check"] = self._directional_tilt_debug(allowed_dot, rejected, reason)
+        return rejected
+
+    def _directional_tilt_debug(self, allowed_dot: float | None, rejected: bool, reason: str) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.normal_surface_directional_tilt_enabled),
+            "rejected": bool(rejected),
+            "reason": reason,
+            "allowed_robot_xy": [float(value) for value in self.normal_surface_directional_tilt_allowed_robot_xy],
+            "min_tilt_deg": float(self.normal_surface_directional_tilt_min_tilt_deg),
+            "min_allowed_dot": float(self.normal_surface_directional_tilt_min_allowed_dot),
+            "allowed_dot": None if allowed_dot is None else float(allowed_dot),
+        }
 
     def _compute_surface_footprint(
         self,

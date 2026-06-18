@@ -4,12 +4,6 @@ from dataclasses import dataclass
 from typing import Any
 
 
-def _required(mapping: dict[str, Any], key: str) -> Any:
-    if key not in mapping:
-        raise ValueError(f"suction config missing required key: {key}")
-    return mapping[key]
-
-
 def _section(mapping: dict[str, Any], key: str) -> dict[str, Any]:
     value = mapping.get(key, {})
     return value if isinstance(value, dict) else {}
@@ -54,7 +48,16 @@ class SuctionConfig:
     suction_strategy_default: str
     suction_strategy_by_class: dict[int, str]
     normal_surface_enabled: bool
-    surface_angle_threshold_deg: float
+    normal_surface_max_robot_z_tilt_deg: float
+    normal_surface_directional_tilt_enabled: bool
+    normal_surface_directional_tilt_allowed_robot_xy: tuple[float, float]
+    normal_surface_directional_tilt_min_tilt_deg: float
+    normal_surface_directional_tilt_min_allowed_dot: float
+    normal_surface_kmeans_k: int
+    normal_surface_kmeans_merge_angle_deg: float
+    normal_surface_kmeans_n_init: int
+    normal_surface_kmeans_max_iter: int
+    normal_surface_kmeans_random_state: int
     surface_open_kernel_px: int
     surface_fill_holes_max_area_px: int
     surface_fill_holes_max_aspect_ratio: float
@@ -62,7 +65,6 @@ class SuctionConfig:
     surface_rect_max_area_ratio: float
     min_surface_region_area_ratio: float
     min_surface_region_area_px: int
-    normal_cluster_max_count: int
     class3_depth_split_enabled: bool
     class3_depth_split_min_gap_mm: float
     class3_depth_split_trim_low_percentile: float
@@ -103,10 +105,11 @@ class SuctionConfig:
         cup_cfg = _section(mapping, "cup")
         collision_guard_cfg = _section(mapping, "collision_guard")
         normal_cfg = _section(mapping, "normal_surface")
-        cluster_cfg = _section(normal_cfg, "cluster")
         morphology_cfg = _section(normal_cfg, "morphology")
         center_cfg = _section(normal_cfg, "center")
         region_cfg = _section(normal_cfg, "min_region")
+        kmeans_cfg = _section(normal_cfg, "kmeans")
+        directional_tilt_cfg = _section(normal_cfg, "directional_tilt")
         class3_depth_cfg = _section(normal_cfg, "class3_depth_split")
         class4_bottle_cfg = _section(mapping, "class4_bottle")
         advanced_cfg = _section(mapping, "advanced")
@@ -127,7 +130,16 @@ class SuctionConfig:
             suction_strategy_default=str(strategy_cfg.get("default", "normal")) if isinstance(strategy_cfg, dict) else "normal",
             suction_strategy_by_class=_strategy_by_class(strategy_cfg),
             normal_surface_enabled=as_bool(_get(mapping, normal_cfg, "enabled", "normal_surface_enabled")),
-            surface_angle_threshold_deg=float(_get(mapping, normal_cfg, "angle_threshold_deg", "surface_angle_threshold_deg")),
+            normal_surface_max_robot_z_tilt_deg=float(normal_cfg.get("max_robot_z_tilt_deg", 180.0)),
+            normal_surface_directional_tilt_enabled=as_bool(directional_tilt_cfg.get("enabled", False)),
+            normal_surface_directional_tilt_allowed_robot_xy=_xy_vector(directional_tilt_cfg.get("allowed_robot_xy", [1.0, 0.0])),
+            normal_surface_directional_tilt_min_tilt_deg=float(directional_tilt_cfg.get("min_tilt_deg", 25.0)),
+            normal_surface_directional_tilt_min_allowed_dot=float(directional_tilt_cfg.get("min_allowed_dot", 0.0)),
+            normal_surface_kmeans_k=int(kmeans_cfg.get("k", 3)),
+            normal_surface_kmeans_merge_angle_deg=float(kmeans_cfg.get("merge_angle_deg", 3.0)),
+            normal_surface_kmeans_n_init=int(kmeans_cfg.get("n_init", 10)),
+            normal_surface_kmeans_max_iter=int(kmeans_cfg.get("max_iter", 100)),
+            normal_surface_kmeans_random_state=int(kmeans_cfg.get("random_state", 0)),
             surface_open_kernel_px=int(_get(mapping, morphology_cfg, "open_kernel_px", "surface_open_kernel_px")),
             surface_fill_holes_max_area_px=int(_get(mapping, morphology_cfg, "fill_holes_max_area_px", "surface_fill_holes_max_area_px", 0)),
             surface_fill_holes_max_aspect_ratio=float(_get(mapping, morphology_cfg, "fill_holes_max_aspect_ratio", "surface_fill_holes_max_aspect_ratio", 4.0)),
@@ -135,7 +147,6 @@ class SuctionConfig:
             surface_rect_max_area_ratio=float(_get(mapping, center_cfg, "rect_max_area_ratio", "surface_rect_max_area_ratio")),
             min_surface_region_area_ratio=float(_get(mapping, region_cfg, "area_ratio", "min_surface_region_area_ratio")),
             min_surface_region_area_px=int(_get(mapping, region_cfg, "area_px", "min_surface_region_area_px")),
-            normal_cluster_max_count=int(_get(mapping, cluster_cfg, "max_count", "normal_cluster_max_count", 5)),
             class3_depth_split_enabled=as_bool(class3_depth_cfg.get("enabled", False)),
             class3_depth_split_min_gap_mm=float(class3_depth_cfg.get("min_gap_mm", 1.0)),
             class3_depth_split_trim_low_percentile=float(class3_depth_cfg.get("trim_low_percentile", 1.0)),
@@ -179,6 +190,16 @@ def _box_roi(value: Any) -> tuple[float, float, float, float]:
     if right <= left or bottom <= top:
         raise ValueError("suction config 'collision_guard.box_roi' must satisfy right > left and bottom > top")
     return left, right, top, bottom
+
+
+def _xy_vector(value: Any) -> tuple[float, float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError("suction config 'directional_tilt.allowed_robot_xy' must contain [x, y]")
+    x, y = [float(item) for item in value]
+    norm = (x * x + y * y) ** 0.5
+    if norm <= 1e-9:
+        raise ValueError("suction config 'directional_tilt.allowed_robot_xy' must be non-zero")
+    return x / norm, y / norm
 
 
 def _strategy_by_class(strategy_cfg: Any) -> dict[int, str]:

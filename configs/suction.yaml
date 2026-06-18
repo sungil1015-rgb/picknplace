@@ -4,9 +4,8 @@ suction:
   strategy:
     default: normal
     by_class:
-      # 비닐류는 normal이 불안정하므로 2D mask 후보점을 사용한다.
+      # class 0은 normal이 불안정하므로 2D mask 후보점을 사용한다.
       0: mask
-      1: mask
       4: class4_bottle
 
   # dual suction cup 실제 규격(mm).
@@ -24,16 +23,30 @@ suction:
   # normal surface를 찾아 suction point를 면 중심으로 이동한다.
   normal_surface:
     enabled: true
-    angle_threshold_deg: 18.0
+    # 방향과 상관없이 이 각도보다 많이 기울어진 normal surface는 버린다.
+    max_robot_z_tilt_deg: 45.0
     candidate_max_count: 3
 
-    cluster:
-      max_count: 5
+    # allowed_robot_xy 반대 방향으로 기울어진 경우만 별도로 제한한다.
+    directional_tilt:
+      enabled: true
+      allowed_robot_xy: [1.0, 0.0]
+      # 이 각도 미만이면 반대 방향이어도 거의 수직으로 보고 허용한다.
+      min_tilt_deg: 30.0
+      # dot(normal_robot_xy_dir, allowed_robot_xy)가 이 값보다 작으면 반대 방향으로 본다.
+      min_allowed_dot: 0.0
+
+    kmeans:
+      k: 2
+      merge_angle_deg: 3.0
+      n_init: 12
+      max_iter: 100
+      random_state: 0
 
     morphology:
       open_kernel_px: 1
-      fill_holes_max_area_px: 50.0
-      fill_holes_max_aspect_ratio: 4.0
+      fill_holes_max_area_px: 5.0
+      fill_holes_max_aspect_ratio: 3.0
 
     center:
       method: rect_center
