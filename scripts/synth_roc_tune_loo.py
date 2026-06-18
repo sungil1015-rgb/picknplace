@@ -34,14 +34,16 @@ from src.defect.synthesize import synthesize_scratch, synthesize_tear
 
 CROP_PADDING_RATIO = 0.03
 CROP_BACKGROUND = 127
-DINOV2_LAYER = 8
+DINOV2_LAYER = 8   # fallback only. 실제 layer는 각 뱅크의 dinov2_layer 메타에서 읽음 (tune_one_class)
 INPUT_SIZE = 224
 GRID_SIZE = INPUT_SIZE // 14
 
-# polygon class_id → (이름, 합성 종류, memory_bank 파일명, 기존 threshold)
+# polygon class_id → (이름, 합성 종류, memory_bank 파일명, 표시용 기존 threshold)
+# 주의: mango는 fusion 기반이라 이 plain-patchcore LOO τ는 운영값이 아님(참고용). 뱅크 없으면 자동 skip.
+# layer는 config 변경(haribo/pencil L5, metal L7)에 맞춰 재빌드된 뱅크의 메타에서 자동 인식됨.
 TARGETS = [
     (1, "haribo", "tear", "patchcore_haribo.npz", 11.0),
-    (2, "mango", "tear", "patchcore_mango_jelly.npz", 18.0),
+    (2, "mango", "tear", "patchcore_mango_v2.npz", 18.0),
     (3, "metal_case", "scratch", "patchcore_metal_case.npz", 10.0),
     (5, "pencil_case", "scratch", "patchcore_pencil_case.npz", 16.0),
 ]
@@ -75,14 +77,14 @@ def crop_with_mask(img, mask, pad_ratio=CROP_PADDING_RATIO):
     return crop, cmask
 
 
-def extract_patches(crop_bgr, crop_mask, processor, model, device):
+def extract_patches(crop_bgr, crop_mask, processor, model, device, layer=DINOV2_LAYER):
     rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
     pil = Image.fromarray(rgb)
     inputs = processor(images=pil, return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     with torch.no_grad():
         outputs = model(**inputs, output_hidden_states=True)
-    patch_tokens = outputs.hidden_states[DINOV2_LAYER + 1][0, 1:, :]
+    patch_tokens = outputs.hidden_states[layer + 1][0, 1:, :]
     grid_mask = cv2.resize(crop_mask.astype(np.uint8), (GRID_SIZE, GRID_SIZE), interpolation=cv2.INTER_AREA) > 0
     sel = np.where(grid_mask.flatten())[0]
     if len(sel) == 0:
@@ -158,12 +160,19 @@ def tune_one_class(target, processor, model, device, output_dir, max_obj=80):
     poly_id, name, synth_type, mb_file, prev_th = target
     print(f"\n=== {name} (polygon {poly_id}, synth={synth_type}, prev τ={prev_th}) ===")
 
-    mb_data = np.load(ROOT / "weights" / mb_file)
+    mb_path = ROOT / "weights" / mb_file
+    if not mb_path.is_file():
+        print(f"  skip — memory bank 없음: {mb_path.name} (재빌드 필요 or 이 클래스 제외)")
+        return None
+    mb_data = np.load(mb_path)
     mb = torch.from_numpy(mb_data["memory_bank"].astype(np.float32)).to(device)
     mb_sq = (mb * mb).sum(dim=1)
     patches_per_object = mb_data["patches_per_object"]
     cum = np.concatenate([[0], np.cumsum(patches_per_object)])
-    print(f"  memory bank: {mb.shape}, n_objects in bank: {len(patches_per_object)}")
+    # 테스트 patch는 반드시 뱅크와 같은 layer에서 뽑아야 거리가 유효 (config layer 변경 대응).
+    # 뱅크에 저장된 dinov2_layer를 source of truth로 사용.
+    bank_layer = int(mb_data["dinov2_layer"]) if "dinov2_layer" in mb_data else DINOV2_LAYER
+    print(f"  memory bank: {mb.shape}, n_objects in bank: {len(patches_per_object)}, layer=L{bank_layer}")
 
     samples = collect_samples_with_idx(poly_id, ROOT / "data" / "labeled")
     print(f"  total label objects: {len(samples)}")
@@ -188,7 +197,7 @@ def tune_one_class(target, processor, model, device, output_dir, max_obj=80):
         crop, cmask = crop_with_mask(img, mask)
         if crop is None:
             continue
-        n_patches = extract_patches(crop, cmask, processor, model, device)
+        n_patches = extract_patches(crop, cmask, processor, model, device, bank_layer)
         if n_patches is None:
             continue
         normal_scores.append(loo_score(n_patches, mb, mb_sq, ex_start, ex_end))
@@ -202,7 +211,7 @@ def tune_one_class(target, processor, model, device, output_dir, max_obj=80):
             synth_crop, _ = crop_with_mask(synth, mask)
             if synth_crop is None:
                 continue
-            d_patches = extract_patches(synth_crop, cmask, processor, model, device)
+            d_patches = extract_patches(synth_crop, cmask, processor, model, device, bank_layer)
             if d_patches is None:
                 continue
             defect_scores.append(loo_score(d_patches, mb, mb_sq, ex_start, ex_end))

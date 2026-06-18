@@ -9,8 +9,12 @@
 ## 0. 한 줄 요약
 
 layer ablation으로 찾은 **클래스별 최적 DinoV2 layer**를 config에 반영해뒀습니다 (코드/설정만, "staged").
-서버에서 **① 메모리뱅크를 새 layer로 맞추고 → ② threshold만 재튜닝**하면 운영 가능합니다.
+회사 서버에서 **① 메모리뱅크를 새 layer로 재빌드 → ② threshold 재튜닝** 두 스크립트만 돌리면 운영 가능합니다.
+둘 다 라벨링 데이터만 있으면 코드로 처음부터 계산되며, **본인 서버에 이미 데이터 있음 = 전제조건 충족.**
 지금 상태로 detector를 로드하면 **layer 가드가 일부러 에러로 멈춥니다** (뱅크가 아직 옛 L8이라). 아래 작업이 그 매칭을 맞추는 것.
+
+> ⚠️ **사전 산출물(`outputs/eda/` 의 ablation 뱅크·τ)은 회사 서버에 없습니다** (작성자 학교 A5000에만 존재).
+> 따라서 **단축 복사 경로 없음 — 아래 재빌드 + 재튜닝을 처음부터 수행**하세요. 데이터만 있으면 됩니다.
 
 ---
 
@@ -45,54 +49,36 @@ git fetch origin && git checkout detector && git pull
 # ⚠️ main 으로 merge/push 금지
 ```
 
-### Step 1 — 단축 경로부터 확인 (이게 살아있으면 거의 끝)
-ablation이 L1~L11 뱅크 + layer별 ROC(τ)를 이미 산출해 `outputs/eda/`에 저장해놨음.
-`outputs/`는 gitignore라 **그 작업 돌린 서버에만** 있음. 회사 서버로 옮겨졌는지 확인:
+### Step 1 — 기존 뱅크 백업 (덮어쓰기 전)
+재빌드가 `weights/patchcore_*.npz`를 덮어씀. L8 원본 보존:
 ```bash
-ls outputs/eda/memory_banks/mb_L5_haribo.npz \
-   outputs/eda/memory_banks/mb_L5_pencil_case.npz \
-   outputs/eda/memory_banks/mb_L7_metal_case.npz
-ls outputs/eda/layer_ablation_summary.md   # layer별 F1-best τ 기록
-```
-- **있으면 → Step 2A (복사, 수 초)**
-- **없으면 → Step 2B (재빌드, 수 분)**
-
-### Step 2A — ablation 산출물 재사용 (있을 때)
-```bash
-# 기존 L8 뱅크 백업
 cp weights/patchcore_haribo.npz      weights/patchcore_haribo.L8.bak.npz
 cp weights/patchcore_pencil_case.npz weights/patchcore_pencil_case.L8.bak.npz
 cp weights/patchcore_metal_case.npz  weights/patchcore_metal_case.L8.bak.npz
-# 새 layer 뱅크로 교체 (config가 기대하는 파일명으로)
-cp outputs/eda/memory_banks/mb_L5_haribo.npz      weights/patchcore_haribo.npz
-cp outputs/eda/memory_banks/mb_L5_pencil_case.npz weights/patchcore_pencil_case.npz
-cp outputs/eda/memory_banks/mb_L7_metal_case.npz  weights/patchcore_metal_case.npz
-```
-데이터 동일성 확인(객체 수 일치하면 OK, 다르면 Step 2B로):
-```bash
-python -c "import numpy as np; a=np.load('weights/patchcore_haribo.L8.bak.npz'); b=np.load('weights/patchcore_haribo.npz'); print('old',int(a['n_objects']),'new',int(b['n_objects']))"
 ```
 
-### Step 2B — 재빌드 (산출물 없을 때)
+### Step 2 — 메모리뱅크 재빌드 (새 layer로)
+라벨링 데이터(`data/labeled/`)로 처음부터 빌드. 각 1~2분, GTX4080이면 충분(DinoV2-base, VRAM 여유):
 ```bash
 python scripts/build_patchcore_refs.py --class_id 1 --class_name haribo      --layer 5
 python scripts/build_patchcore_refs.py --class_id 5 --class_name pencil_case --layer 5
 python scripts/build_patchcore_refs.py --class_id 3 --class_name metal_case  --layer 7
-# 출력 weights/patchcore_*.npz 가 기존 파일 덮어씀 — 필요시 사전 백업
 ```
+→ 결과 npz에 `dinov2_layer`가 박혀서 이후 가드/튜닝이 layer를 자동 인식함.
+**mango는 빌드하지 마세요** (L8 그대로, `patchcore_mango_v2.npz` 유지).
 
 ### Step 3 — threshold 재튜닝
-layer 바뀌면 점수 척도가 달라져 기존 threshold 무효. 새 layer 기준으로 다시 잡아야 함.
-- **`outputs/eda/layer_ablation_summary.md`에 layer별 F1-best τ가 이미 있으면** 그 값을 config에 반영.
-- 없으면 재계산:
+layer 바뀌면 점수 척도가 달라져 기존 threshold 무효. 새 layer 기준으로 다시 계산:
 ```bash
-python scripts/synth_roc_tune_loo.py   # 재빌드된 뱅크 대상, F1-best τ 산출
+python scripts/synth_roc_tune_loo.py
 ```
-산출된 τ를 `configs/defect_detection.yaml`에 반영:
-- haribo: `detectors.0.signals.patchcore.threshold` ← (현재 8.6, 무효)
-- pencil_case: `detectors.2.threshold` ← (현재 9.2, 무효)
-- metal_case: `detectors.3.threshold` ← (현재 6.0, L7 참고값 5.76 보수절상. 실측 재확인)
-- **운영점 기준: F1-best** (원래 방식). 안전 우선이면 FPR≤5% 운영점으로.
+- 이 스크립트는 **각 뱅크의 `dinov2_layer` 메타를 읽어 같은 layer로 테스트 patch를 뽑습니다** (layer-aware로 수정됨). 그래서 재빌드만 해두면 추가 인자 없이 그대로 돌리면 됨.
+- 출력 마지막의 `=== 최종 권장 threshold 표 ===`에서 클래스별 **F1-best τ**를 읽어 config에 반영:
+  - haribo: `detectors.0.signals.patchcore.threshold` ← (현재 8.6, 무효 placeholder)
+  - pencil_case: `detectors.2.threshold` ← (현재 9.2, 무효 placeholder)
+  - metal_case: `detectors.3.threshold` ← (현재 6.0, 참고값. 실측으로 교체)
+  - **운영점 기준: F1-best** (원래 방식). 안전 우선이면 표의 FPR 보고 FPR≤5% 지점으로.
+- **mango 행은 무시**하세요 — fusion 기반이라 이 plain-patchcore τ는 운영값 아님 (뱅크 없으면 자동 skip됨).
 
 ### Step 4 — 검증
 ```bash
@@ -110,6 +96,8 @@ python -c "from src.defect.registry import DefectRegistry; r=DefectRegistry('con
 3. **mango는 손대지 마세요.** L8 유지, `enabled:false` 유지. fusion 가중치 w=0.25는 실물 찢김 데이터 있어야 검증 가능 — 이번 작업 범위 밖.
 4. **뱅크 layer 메타 필수.** 수정된 `build_patchcore_refs.py`로 빌드하면 npz에 `dinov2_layer`가 박혀 가드가 동작. 옛 방식(layer 메타 없는) 뱅크 재활용 금지 — 가드가 못 잡고 조용히 틀림.
 5. **main 금지.** 모든 작업은 `detector` 브랜치.
+6. **GTX4080(Ada) 환경.** 연산/VRAM은 전혀 문제 없음(DinoV2-base ~350MB). 단 PyTorch가 Ada 지원하는 빌드여야 함 (CUDA 11.8+ / cu118 이상). 기존 환경 그대로면 신경 안 써도 됨.
+7. **튜닝 스크립트는 layer-aware로 수정됨** (`synth_roc_tune_loo.py`가 뱅크 메타에서 layer 읽음). 옛 버전은 L8 하드코딩이라 새 layer에서 틀린 τ가 나왔음 — 반드시 최신 `detector` pull 후 사용.
 
 ---
 
