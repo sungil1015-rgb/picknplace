@@ -9,8 +9,8 @@ classifier:
   crop_padding: 0
   masked_crop: true
   masked_crop_background: 127
-  cls_weight: 0.7
-  patch_mean_weight: 0.3
+  cls_weight: 0.6
+  patch_mean_weight: 0.4
   patch_mean_source: masked
   rgb_weight: 1.0
   gray_weight: 0.0
@@ -23,8 +23,9 @@ classifier:
   # One-based bank labels/class_names are normalized to 0..4 when loaded.
   min_similarity_by_class:
     0: 0.80
-    1: 0.80
-    2: 0.65
+    1: 0.85
+    2: 0.70
     3: 0.65
+    4: 0.75
   min_vote_ratio_by_class: {}
   min_margin_by_class: {}

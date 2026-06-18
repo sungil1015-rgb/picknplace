@@ -53,6 +53,10 @@ class SuctionConfig:
     normal_surface_directional_tilt_allowed_robot_xy: tuple[float, float]
     normal_surface_directional_tilt_min_tilt_deg: float
     normal_surface_directional_tilt_min_allowed_dot: float
+    normal_surface_suction_depth_check_enabled: bool
+    normal_surface_suction_depth_check_max_diff_mm: float
+    normal_surface_suction_depth_check_min_valid_ratio: float
+    normal_surface_area_dominance_ratio: float
     normal_surface_kmeans_k: int
     normal_surface_kmeans_merge_angle_deg: float
     normal_surface_kmeans_n_init: int
@@ -110,6 +114,7 @@ class SuctionConfig:
         region_cfg = _section(normal_cfg, "min_region")
         kmeans_cfg = _section(normal_cfg, "kmeans")
         directional_tilt_cfg = _section(normal_cfg, "directional_tilt")
+        suction_depth_check_cfg = _section(normal_cfg, "suction_depth_check")
         class3_depth_cfg = _section(normal_cfg, "class3_depth_split")
         class4_bottle_cfg = _section(mapping, "class4_bottle")
         advanced_cfg = _section(mapping, "advanced")
@@ -135,6 +140,10 @@ class SuctionConfig:
             normal_surface_directional_tilt_allowed_robot_xy=_xy_vector(directional_tilt_cfg.get("allowed_robot_xy", [1.0, 0.0])),
             normal_surface_directional_tilt_min_tilt_deg=float(directional_tilt_cfg.get("min_tilt_deg", 25.0)),
             normal_surface_directional_tilt_min_allowed_dot=float(directional_tilt_cfg.get("min_allowed_dot", 0.0)),
+            normal_surface_suction_depth_check_enabled=as_bool(suction_depth_check_cfg.get("enabled", False)),
+            normal_surface_suction_depth_check_max_diff_mm=float(suction_depth_check_cfg.get("max_dual_cup_depth_diff_mm", 0.7)),
+            normal_surface_suction_depth_check_min_valid_ratio=float(suction_depth_check_cfg.get("min_cup_valid_ratio", 0.3)),
+            normal_surface_area_dominance_ratio=float(normal_cfg.get("area_dominance_ratio", 1.5)),
             normal_surface_kmeans_k=int(kmeans_cfg.get("k", 3)),
             normal_surface_kmeans_merge_angle_deg=float(kmeans_cfg.get("merge_angle_deg", 3.0)),
             normal_surface_kmeans_n_init=int(kmeans_cfg.get("n_init", 10)),

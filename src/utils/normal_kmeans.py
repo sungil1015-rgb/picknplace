@@ -173,6 +173,7 @@ def kmeans_normal_surface_candidates(
                 break
 
             surface = component_labels == component_id
+            dispersion_debug = _normal_dispersion_debug(normal_map, surface, merged_centers[cluster_id])
             center_u, center_v, center_debug = surface_center_from_method(
                 surface,
                 mask_bool,
@@ -196,6 +197,7 @@ def kmeans_normal_surface_candidates(
                         "surface_rect_box_xy": center_debug.get("rect_box_xy"),
                         "surface_rect_center_xy": center_debug.get("rect_center_xy"),
                         "surface_rect_max_area_ratio": float(rect_max_area_ratio),
+                        **dispersion_debug,
                         **base_debug,
                     },
                 )
@@ -284,6 +286,40 @@ def _normal_list(normal: np.ndarray) -> list[float]:
     if norm > 1e-9:
         values = values / norm
     return [float(value) for value in values]
+
+
+def _normal_dispersion_debug(
+    normal_map: np.ndarray,
+    surface: np.ndarray,
+    center_normal: np.ndarray,
+) -> dict[str, Any]:
+    normals = normal_map[surface > 0].astype(np.float64)
+    if normals.size == 0:
+        return {
+            "normal_angular_mean_deg": None,
+            "normal_angular_std_deg": None,
+            "normal_angular_max_deg": None,
+            "normal_dispersion_pixels": 0,
+        }
+    center = _normal_array(center_normal)
+    norms = np.linalg.norm(normals, axis=1)
+    valid = norms > 1e-9
+    if not np.any(valid):
+        return {
+            "normal_angular_mean_deg": None,
+            "normal_angular_std_deg": None,
+            "normal_angular_max_deg": None,
+            "normal_dispersion_pixels": 0,
+        }
+    unit_normals = normals[valid] / norms[valid].reshape(-1, 1)
+    dots = np.clip(unit_normals @ center, -1.0, 1.0)
+    angles = np.degrees(np.arccos(dots))
+    return {
+        "normal_angular_mean_deg": float(np.mean(angles)),
+        "normal_angular_std_deg": float(np.std(angles)),
+        "normal_angular_max_deg": float(np.max(angles)),
+        "normal_dispersion_pixels": int(angles.size),
+    }
 
 
 def _cleanup(

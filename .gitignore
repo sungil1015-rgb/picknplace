@@ -35,3 +35,18 @@ debug_normal
 src/utils/debug_normal.py
 src/utils/debug_plane.py
 debug_plane
+src/utils/debug_depth_3d.py
+debug_3d
+analysis_report_py
+analysis_report
+
+# Generated analysis/debug artifacts
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+*.webp
+*.tif
+*.tiff
+*.csv

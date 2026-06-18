@@ -1,9 +1,9 @@
 priority:
-  # 우선순위는 현재 3개 값만 본다:
-  # 1) 파지점 주변 local depth
-  # 2) classification similarity
-  # 3) classification reject reason
-  #
-  # 실제 정렬 점수(total)는 아직 local depth score만 사용하고,
-  # similarity/reject reason은 debug와 다음 정책 결정을 위해 저장한다.
-  local_depth_window: 11
+  # known 후보는 similarity 높은 순으로 4개, unknown 추정 후보는 depth 높은 순으로 2개를 살린다.
+  # 두 pool을 합친 뒤 depth가 가장 높은 후보를 최종 선택한다.
+  known_top_count: 4
+  unknown_top_count: 2
+
+  # low similarity + low vote가 동시에 성립하면 unknown 추정으로 본다.
+  unknown_low_similarity_threshold: 0.78
+  unknown_low_vote_threshold: 1.0

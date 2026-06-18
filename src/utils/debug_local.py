@@ -59,6 +59,72 @@ def _memory_text() -> str:
     return f"rss={rss_text}, peak={_peak_rss_mb():.1f} MB"
 
 
+def _cuda_memory_mb() -> dict[str, Any]:
+    try:
+        import torch
+    except Exception as exc:
+        return {"cuda_available": False, "reason": f"torch_import_failed:{type(exc).__name__}"}
+
+    try:
+        available = bool(torch.cuda.is_available())
+    except Exception as exc:
+        return {"cuda_available": False, "reason": f"cuda_check_failed:{type(exc).__name__}"}
+    if not available:
+        return {"cuda_available": False}
+
+    try:
+        device_index = int(torch.cuda.current_device())
+        return {
+            "cuda_available": True,
+            "cuda_device_index": device_index,
+            "cuda_device_name": torch.cuda.get_device_name(device_index),
+            "cuda_allocated_mb": float(torch.cuda.memory_allocated(device_index)) / (1024.0 * 1024.0),
+            "cuda_reserved_mb": float(torch.cuda.memory_reserved(device_index)) / (1024.0 * 1024.0),
+            "cuda_max_allocated_mb": float(torch.cuda.max_memory_allocated(device_index)) / (1024.0 * 1024.0),
+            "cuda_max_reserved_mb": float(torch.cuda.max_memory_reserved(device_index)) / (1024.0 * 1024.0),
+        }
+    except Exception as exc:
+        return {"cuda_available": True, "reason": f"cuda_memory_failed:{type(exc).__name__}"}
+
+
+def _memory_snapshot(stage: str, elapsed_sec: float | None = None) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {
+        "stage": stage,
+        "elapsed_sec": float(elapsed_sec) if elapsed_sec is not None else None,
+        "rss_mb": _rss_mb(),
+        "peak_rss_mb": _peak_rss_mb(),
+    }
+    snapshot.update(_cuda_memory_mb())
+    return snapshot
+
+
+def _reset_cuda_peak_memory() -> None:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+    except Exception:
+        return
+
+
+def _memory_summary(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+    def _max_value(key: str) -> float | None:
+        values = [safe for item in snapshots for safe in [item.get(key)] if isinstance(safe, (int, float)) and np.isfinite(float(safe))]
+        return float(max(values)) if values else None
+
+    return {
+        "peak_rss_mb": _max_value("peak_rss_mb"),
+        "max_rss_mb": _max_value("rss_mb"),
+        "cuda_available": any(bool(item.get("cuda_available")) for item in snapshots),
+        "cuda_device_name": next((item.get("cuda_device_name") for item in snapshots if item.get("cuda_device_name")), None),
+        "max_cuda_allocated_mb": _max_value("cuda_allocated_mb"),
+        "max_cuda_reserved_mb": _max_value("cuda_reserved_mb"),
+        "max_cuda_peak_allocated_mb": _max_value("cuda_max_allocated_mb"),
+        "max_cuda_peak_reserved_mb": _max_value("cuda_max_reserved_mb"),
+    }
+
+
 def _selected_model(option_file: str) -> tuple[dict[str, Any], str]:
     _, _, model_name, model_list, gpu_id, _ = load_option_file(option_file)
     for model_cfg in model_list:
@@ -344,8 +410,13 @@ def _priority_debug(prediction: Any) -> dict[str, Any]:
         "depth_score": _finite_float(getattr(prediction, "grasp_depth_score", None)),
         "grasp_depth": _finite_float(getattr(prediction, "grasp_depth", None)),
         "grasp_xy": getattr(prediction, "grasp_xy", None),
+        "grasp_depth_source": getattr(prediction, "grasp_depth_source", None),
+        "priority_depth_source": getattr(prediction, "priority_depth_source", None),
+        "priority_depth_value": _finite_float(getattr(prediction, "priority_depth_value", None)),
         "class_similarity": _finite_float(getattr(prediction, "grasp_class_similarity", None)),
+        "class_vote_ratio": _finite_float(getattr(prediction, "grasp_class_vote_ratio", None)),
         "class_reject_reason": getattr(prediction, "grasp_class_reject_reason", None),
+        "priority_stage": getattr(prediction, "grasp_priority_stage", None),
         "valid_depth": bool(getattr(prediction, "grasp_valid_depth", False)),
         "mask_area": getattr(prediction, "grasp_mask_area", None),
         "suction_normal_z_score": _finite_float(getattr(prediction, "suction_normal_z_score", None)),
@@ -596,6 +667,9 @@ def _save_debug_result(
     with json_path.open("w", encoding="utf-8") as handle:
         json.dump(
             {
+                "timing": result.get("timing", {}),
+                "memory": result.get("memory", []),
+                "memory_summary": result.get("memory_summary", {}),
                 "sample": str(sample_dir),
                 "state": result.get("state"),
                 "objects": summaries,
@@ -627,6 +701,7 @@ def _compute_debug_suction_top_k(
 
     target_count = min(int(top_k), len(predictions))
     suction_points = [[] for _ in predictions]
+    normal_start = time.perf_counter()
     computed_points = model.suction_pipeline.compute(
         predictions[:target_count],
         depth_image,
@@ -634,6 +709,10 @@ def _compute_debug_suction_top_k(
         model.c_matrix,
         model.extrinsic,
     )
+    normal_elapsed = time.perf_counter() - normal_start
+    timing = result.setdefault("timing", {})
+    timing["normal_sec"] = float(timing.get("normal_sec", 0.0) or 0.0) + float(normal_elapsed)
+    timing["debug_suction_sec"] = float(normal_elapsed)
     for index, point_list in enumerate(computed_points):
         suction_points[index] = point_list
         surface_debug = getattr(predictions[index], "suction_surface", None)
@@ -666,7 +745,9 @@ def run_debug(args: argparse.Namespace) -> None:
 
     logger.info(f"debug samples: {len(sample_dirs)}")
     for sample_dir in sample_dirs:
+        _reset_cuda_peak_memory()
         sample_start = time.perf_counter()
+        memory_snapshots = [_memory_snapshot("sample_start", 0.0)]
         rgb_path = sample_dir / "rgb.png"
         depth_path = sample_dir / "depth.png"
         normal_path = sample_dir / "normal.bin"
@@ -678,6 +759,7 @@ def run_debug(args: argparse.Namespace) -> None:
         depth = cv2.imread(str(depth_path), cv2.IMREAD_UNCHANGED) if depth_path.is_file() else None
         normal = _load_normal(normal_path, image.shape[:2])
         load_elapsed = time.perf_counter() - load_start
+        memory_snapshots.append(_memory_snapshot("after_load_inputs", time.perf_counter() - sample_start))
 
         run_start = time.perf_counter()
         result, predictions = model.run(
@@ -687,6 +769,7 @@ def run_debug(args: argparse.Namespace) -> None:
             compute_suction_pts=False,
             roi_2d=list(getattr(model, "segmentation_roi", [])),
         )
+        memory_snapshots.append(_memory_snapshot("after_model_run", time.perf_counter() - sample_start))
         _compute_debug_suction_top_k(
             model,
             result,
@@ -695,7 +778,11 @@ def run_debug(args: argparse.Namespace) -> None:
             normal,
             top_k=args.suction_top_k,
         )
+        memory_snapshots.append(_memory_snapshot("after_debug_suction_top_k", time.perf_counter() - sample_start))
         run_elapsed = time.perf_counter() - run_start
+        memory_snapshots.append(_memory_snapshot("before_save_debug_result", time.perf_counter() - sample_start))
+        result["memory"] = memory_snapshots
+        result["memory_summary"] = _memory_summary(memory_snapshots)
 
         save_start = time.perf_counter()
         _save_debug_result(

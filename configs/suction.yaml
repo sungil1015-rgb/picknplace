@@ -4,8 +4,6 @@ suction:
   strategy:
     default: normal
     by_class:
-      # class 0은 normal이 불안정하므로 2D mask 후보점을 사용한다.
-      0: mask
       4: class4_bottle
 
   # dual suction cup 실제 규격(mm).
@@ -26,6 +24,8 @@ suction:
     # 방향과 상관없이 이 각도보다 많이 기울어진 normal surface는 버린다.
     max_robot_z_tilt_deg: 45.0
     candidate_max_count: 3
+    # 최대 면적 후보가 다른 후보보다 이 배수 이상 크지 않으면 normal 분산이 낮은 후보를 우선한다.
+    area_dominance_ratio: 1.5
 
     # allowed_robot_xy 반대 방향으로 기울어진 경우만 별도로 제한한다.
     directional_tilt:
@@ -35,6 +35,12 @@ suction:
       min_tilt_deg: 30.0
       # dot(normal_robot_xy_dir, allowed_robot_xy)가 이 값보다 작으면 반대 방향으로 본다.
       min_allowed_dot: 0.0
+
+    # dual cup 두 영역의 depth median 차이가 크면 한쪽 컵만 먼저 닿는 상황으로 보고 버린다.
+    suction_depth_check:
+      enabled: false
+      max_dual_cup_depth_diff_mm: 0.7
+      min_cup_valid_ratio: 0.3
 
     kmeans:
       k: 2
@@ -58,14 +64,14 @@ suction:
 
     class3_depth_split:
       enabled: true
-      min_gap_mm: 0.9
+      min_gap_mm: 0.5
       trim_low_percentile: 1.0
       trim_high_percentile: 99.0
       cut_band_mm: 1.0
       bridge_open_kernel_px: 2
       line_cut_enabled: true
       line_cut_thickness_px: 3
-      line_cut_min_aspect_ratio: 1.5
+      line_cut_min_aspect_ratio: 1.2
       min_layer_area_px: 300
       min_layer_area_ratio: 0.08
       min_component_area_px: 300

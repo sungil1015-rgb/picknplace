@@ -14,6 +14,7 @@ def compact_surface_attempt_debug(debug: dict[str, Any]) -> dict[str, Any]:
         "reason",
         "suction_reject_reason",
         "selected",
+        "selection_reason",
         "candidate_index",
         "candidate_source",
         "normal_surface_mode",
@@ -33,6 +34,13 @@ def compact_surface_attempt_debug(debug: dict[str, Any]) -> dict[str, Any]:
         "surface_area",
         "object_area",
         "surface_area_ratio",
+        "normal_angular_mean_deg",
+        "normal_angular_std_deg",
+        "normal_angular_max_deg",
+        "normal_dispersion_pixels",
+        "grasp_depth_source",
+        "grasp_depth_valid_pixels",
+        "grasp_depth_window",
         "normal_z_score",
         "robot_z_tilt_deg",
         "normal_robot",
@@ -41,23 +49,11 @@ def compact_surface_attempt_debug(debug: dict[str, Any]) -> dict[str, Any]:
         "max_robot_z_tilt_deg",
         "suction_area_pixels",
         "suction_footprint_check_used",
+        "area_dominance_ratio",
         "footprint_axis_source",
         "footprint_axis_xy",
     )
     compact = {key: debug[key] for key in keep_keys if key in debug}
-    coverage = debug.get("suction_area_check")
-    if isinstance(coverage, dict):
-        compact["suction_area_check"] = {
-            key: coverage.get(key)
-            for key in (
-                "passed",
-                "reason",
-                "object_coverage",
-                "surface_coverage",
-                "suction_area_pixels",
-            )
-            if key in coverage
-        }
     directional = debug.get("directional_tilt_check")
     if isinstance(directional, dict):
         compact["directional_tilt_check"] = {
@@ -72,6 +68,28 @@ def compact_surface_attempt_debug(debug: dict[str, Any]) -> dict[str, Any]:
                 "allowed_dot",
             )
             if key in directional
+        }
+    suction_depth = debug.get("suction_depth_check")
+    if isinstance(suction_depth, dict):
+        compact["suction_depth_check"] = {
+            key: suction_depth.get(key)
+            for key in (
+                "enabled",
+                "passed",
+                "reason",
+                "max_dual_cup_depth_diff_mm",
+                "min_cup_valid_ratio",
+                "dual_cup_depth_diff_mm",
+                "dual_cup_plane_residual_diff_mm",
+                "cup_depth_medians_mm",
+                "cup_depth_iqr_mm",
+                "cup_plane_residual_medians_mm",
+                "cup_plane_residual_iqr_mm",
+                "cup_valid_ratios",
+                "cup_valid_counts",
+                "cup_pixel_counts",
+            )
+            if key in suction_depth
         }
     split = debug.get("class3_depth_split")
     if isinstance(split, dict):

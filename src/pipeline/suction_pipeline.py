@@ -16,22 +16,20 @@ from src.utils.geometry import (
     transform_point,
 )
 from src.utils.class4_bottle import estimate_class4_bottle_surface
-from src.utils.depth import median_valid_depth_at_point, split_surface_by_depth_gap
+from src.utils.depth import median_valid_depth_at_point, split_surface_by_depth_gap, valid_depth_values
 from src.utils.mask import largest_component_mask, mask_center_point
 from src.utils.normal_surface import (
     compact_surface_attempt_debug,
     surface_center_from_method,
 )
 from src.utils.normal_kmeans import kmeans_normal_surface_candidates
-from src.utils.suction_evaluation import (
-    normal_z_score,
-    suction_area_coverage,
-)
+from src.utils.suction_evaluation import normal_z_score
 from src.utils.suction_footprint import (
     SuctionFootprint,
     compute_dual_cup_footprint,
     compute_projected_dual_cup_footprint,
     dual_cup_capsule_mask,
+    dual_cup_normal_projected_capsule_mask,
     principal_axis_2d,
 )
 from src.utils.suction_config import SuctionConfig
@@ -65,6 +63,10 @@ class SuctionPipeline:
         self.normal_surface_directional_tilt_allowed_robot_xy = tuple(config.normal_surface_directional_tilt_allowed_robot_xy)
         self.normal_surface_directional_tilt_min_tilt_deg = float(config.normal_surface_directional_tilt_min_tilt_deg)
         self.normal_surface_directional_tilt_min_allowed_dot = float(config.normal_surface_directional_tilt_min_allowed_dot)
+        self.normal_surface_suction_depth_check_enabled = bool(config.normal_surface_suction_depth_check_enabled)
+        self.normal_surface_suction_depth_check_max_diff_mm = float(config.normal_surface_suction_depth_check_max_diff_mm)
+        self.normal_surface_suction_depth_check_min_valid_ratio = float(config.normal_surface_suction_depth_check_min_valid_ratio)
+        self.normal_surface_area_dominance_ratio = float(config.normal_surface_area_dominance_ratio)
         self.normal_surface_kmeans_k = int(config.normal_surface_kmeans_k)
         self.normal_surface_kmeans_merge_angle_deg = float(config.normal_surface_kmeans_merge_angle_deg)
         self.normal_surface_kmeans_n_init = int(config.normal_surface_kmeans_n_init)
@@ -145,6 +147,170 @@ class SuctionPipeline:
             setattr(instance, "suction_surface", surface_debug)
             suction_points.append([point] if point is not None else [])
         return suction_points
+
+    def prepare_priority_depth_masks(
+        self,
+        instances: Sequence[Any],
+        depth_image: np.ndarray | None,
+        normal_image: np.ndarray | None,
+        intrinsic: np.ndarray,
+        extrinsic: np.ndarray,
+    ) -> None:
+        for instance in instances:
+            setattr(instance, "priority_depth_mask", None)
+            setattr(instance, "priority_depth_center_xy", None)
+            setattr(instance, "priority_depth_source", None)
+            setattr(instance, "priority_depth_value", None)
+            setattr(instance, "priority_depth_surface_debug", None)
+
+            mask = getattr(instance, "mask", None)
+            if mask is None:
+                continue
+            binary_mask = largest_component_mask((mask > 0).astype(np.uint8))
+            if binary_mask is None or not np.any(binary_mask):
+                continue
+
+            strategy = self._suction_strategy_for_instance(instance)
+            if strategy == "mask" or normal_image is None or not self.normal_surface_enabled:
+                self._set_priority_depth_mask(instance, binary_mask, "mask")
+                continue
+            if strategy == "class4_bottle":
+                selected = self._select_priority_class4_bottle_depth(
+                    instance,
+                    binary_mask,
+                    depth_image,
+                    normal_image,
+                    intrinsic,
+                )
+                if selected is None:
+                    self._set_priority_depth_mask(instance, binary_mask, "mask_class4_bottle_fallback")
+                else:
+                    cap_mask, depth_mm, debug = selected
+                    self._set_priority_depth_mask(
+                        instance,
+                        cap_mask,
+                        "class4_bottle_cap",
+                        debug,
+                        depth_value=depth_mm,
+                    )
+                continue
+
+            selected = self._select_priority_normal_surface(
+                instance,
+                binary_mask,
+                depth_image,
+                normal_image,
+                intrinsic,
+                extrinsic,
+            )
+            if selected is None:
+                self._set_priority_depth_mask(instance, binary_mask, "mask_fallback")
+                continue
+            surface, debug = selected
+            self._set_priority_depth_mask(instance, surface, "normal_surface", debug)
+
+    def _set_priority_depth_mask(
+        self,
+        instance: Any,
+        mask: np.ndarray,
+        source: str,
+        debug: dict[str, Any] | None = None,
+        depth_value: float | None = None,
+    ) -> None:
+        setattr(instance, "priority_depth_mask", mask > 0)
+        setattr(instance, "priority_depth_source", str(source))
+        setattr(instance, "priority_depth_value", depth_value)
+        center_xy = None
+        if isinstance(debug, dict):
+            center_xy = debug.get("surface_center_xy")
+        if isinstance(center_xy, (list, tuple)) and len(center_xy) == 2:
+            setattr(instance, "priority_depth_center_xy", [int(center_xy[0]), int(center_xy[1])])
+        else:
+            center = mask_center_point(mask > 0)
+            setattr(instance, "priority_depth_center_xy", [int(center[0]), int(center[1])])
+        setattr(instance, "priority_depth_surface_debug", compact_surface_attempt_debug(debug) if isinstance(debug, dict) else None)
+
+    def _select_priority_class4_bottle_depth(
+        self,
+        instance: Any,
+        mask: np.ndarray,
+        depth_image: np.ndarray | None,
+        normal_image: np.ndarray | None,
+        intrinsic: np.ndarray,
+    ) -> tuple[np.ndarray, float, dict[str, Any]] | None:
+        del instance
+        estimate = estimate_class4_bottle_surface(
+            mask,
+            depth_image,
+            normal_image,
+            intrinsic,
+            cap_depth_percentile=self.class4_bottle_cap_depth_percentile,
+            cap_depth_band_mm=self.class4_bottle_cap_depth_band_mm,
+            cap_anchor_percentile=self.class4_bottle_cap_anchor_percentile,
+            cap_anchor_band_mm=self.class4_bottle_cap_anchor_band_mm,
+            min_cap_anchor_area_px=self.class4_bottle_min_cap_anchor_area_px,
+            cap_open_kernel_px=self.class4_bottle_cap_open_kernel_px,
+            cap_close_kernel_px=self.class4_bottle_cap_close_kernel_px,
+            min_cap_area_px=self.class4_bottle_min_cap_area_px,
+            cap_normal_window_px=self.class4_bottle_cap_normal_window_px,
+            min_cap_normal_pixels=self.class4_bottle_min_cap_normal_pixels,
+            point_source=self.class4_bottle_point_source,
+            endpoint_fraction=self.class4_bottle_endpoint_fraction,
+            endpoint_valid_ratio_margin=self.class4_bottle_endpoint_valid_ratio_margin,
+            min_endpoint_valid_px=self.class4_bottle_min_endpoint_valid_px,
+            min_endpoint_valid_ratio=self.class4_bottle_min_endpoint_valid_ratio,
+        )
+        debug = {
+            "passed": bool(estimate.passed),
+            "reason": estimate.reason,
+            "normal_surface_mode": "class4_bottle_priority",
+            "class4_bottle": estimate.to_debug_dict(),
+        }
+        if not estimate.passed or estimate.cap_mask is None or estimate.depth_mm is None:
+            return None
+        debug["surface_center_xy"] = [int(estimate.point_xy[0]), int(estimate.point_xy[1])] if estimate.point_xy is not None else None
+        debug["surface_area"] = int(np.count_nonzero(estimate.cap_mask))
+        debug["object_area"] = int(np.count_nonzero(mask))
+        debug["surface_area_ratio"] = float(debug["surface_area"] / max(debug["object_area"], 1))
+        return estimate.cap_mask > 0, float(estimate.depth_mm), debug
+
+    def _select_priority_normal_surface(
+        self,
+        instance: Any,
+        mask: np.ndarray,
+        depth_image: np.ndarray | None,
+        normal_image: np.ndarray,
+        intrinsic: np.ndarray,
+        extrinsic: np.ndarray,
+    ) -> tuple[np.ndarray, dict[str, Any]] | None:
+        passed: list[tuple[np.ndarray, dict[str, Any]]] = []
+        for index, (surface, debug) in enumerate(self._normal_surface_candidates(normal_image, mask)):
+            debug["candidate_index"] = int(index)
+            debug["candidate_source"] = "kmeans"
+            if surface is None or not debug.get("passed"):
+                continue
+            surface, debug = self._refine_class3_surface_by_depth(
+                instance,
+                depth_image,
+                surface,
+                mask,
+                debug,
+                intrinsic,
+            )
+            if surface is None or not debug.get("passed"):
+                continue
+            debug["normal_z_score"] = normal_z_score(debug)
+            debug.update(self._robot_z_debug(debug, extrinsic))
+            if debug["robot_z_tilt_deg"] > self.normal_surface_max_robot_z_tilt_deg:
+                continue
+            if self._reject_directional_tilt(debug):
+                continue
+            passed.append((surface > 0, debug))
+
+        if not passed:
+            return None
+        selected, _ = self._select_surface_candidate(passed, lambda item: item[1])
+        return selected
 
     def _compute_one(
         self,
@@ -369,14 +535,6 @@ class SuctionPipeline:
             axis_xy=axis_xy,
         )
         surface = mask > 0
-        coverage = suction_area_coverage(
-            mask,
-            surface,
-            footprint,
-            self.min_suction_area_object_coverage,
-            self.min_suction_area_surface_coverage,
-            suction_area=suction_area,
-        )
         surface_debug: dict[str, Any] = {
             "passed": True,
             "reason": None,
@@ -393,12 +551,27 @@ class SuctionPipeline:
             "seed_normal": [float(value) for value in normal_camera],
             "normal_z_score": normal_z_score({"seed_normal": [float(value) for value in normal_camera]}),
             "footprint_projection": "class4_bottle_normal_projected_ellipse",
-            "suction_area_check": coverage,
-            "suction_area_pixels": int(coverage.get("suction_area_pixels", 0)),
+            "suction_area_pixels": self._suction_area_pixels(mask.shape, footprint, suction_area),
             "suction_footprint_check_used": False,
             "class4_bottle": estimate_debug,
         }
         surface_debug.update(axis_debug)
+        depth_check = self._suction_depth_check(
+            depth_image,
+            footprint,
+            normal_camera,
+            intrinsic,
+        )
+        surface_debug["suction_depth_check"] = depth_check
+        if not depth_check.get("passed", True):
+            surface_debug["passed"] = False
+            surface_debug["suction_reject_reason"] = depth_check.get("reason", "suction_depth_check_failed")
+            return None, {
+                "passed": False,
+                "reason": surface_debug["suction_reject_reason"],
+                "class4_bottle": estimate_debug,
+                "surface_attempt": compact_surface_attempt_debug(surface_debug),
+            }
 
         return (int(u), int(v), float(estimate.depth_mm), footprint, surface_debug), None
 
@@ -460,16 +633,18 @@ class SuctionPipeline:
                 surface,
                 mask,
                 surface_debug,
+                intrinsic,
             )
             if surface is None:
                 attempts.append(surface_debug)
                 continue
 
             u, v = surface_debug["surface_center_xy"]
-            depth_mm = median_valid_depth_at_point(depth_image, u, v, mask, window=self.depth_window)
+            depth_mm, depth_debug = self._normal_surface_grasp_depth(depth_image, surface, mask, int(u), int(v))
+            surface_debug.update(depth_debug)
             if depth_mm is None:
                 surface_debug["passed"] = False
-                surface_debug["suction_reject_reason"] = "missing_depth_at_surface_center"
+                surface_debug["suction_reject_reason"] = "missing_depth_at_normal_surface"
                 attempts.append(surface_debug)
                 continue
 
@@ -481,16 +656,7 @@ class SuctionPipeline:
                 intrinsic,
                 surface_debug,
             )
-            coverage = suction_area_coverage(
-                mask,
-                surface,
-                footprint,
-                self.min_suction_area_object_coverage,
-                self.min_suction_area_surface_coverage,
-                suction_area=suction_area,
-            )
-            surface_debug["suction_area_check"] = coverage
-            surface_debug["suction_area_pixels"] = int(coverage.get("suction_area_pixels", 0))
+            surface_debug["suction_area_pixels"] = self._suction_area_pixels(mask.shape, footprint, suction_area)
             surface_debug["suction_footprint_check_used"] = False
             surface_debug["passed"] = True
             surface_debug["reason"] = None
@@ -507,21 +673,27 @@ class SuctionPipeline:
                 surface_debug["suction_reject_reason"] = "robot_z_tilt_opposite_direction"
                 attempts.append(surface_debug)
                 continue
+            depth_check = self._suction_depth_check(
+                depth_image,
+                footprint,
+                self._seed_normal_from_debug(surface_debug),
+                intrinsic,
+            )
+            surface_debug["suction_depth_check"] = depth_check
+            if not depth_check.get("passed", True):
+                surface_debug["passed"] = False
+                surface_debug["suction_reject_reason"] = depth_check.get("reason", "suction_depth_check_failed")
+                attempts.append(surface_debug)
+                continue
             attempts.append(surface_debug)
             passed_options.append((int(u), int(v), float(depth_mm), footprint, surface_debug))
 
         if passed_options:
-            selected = max(
-                passed_options,
-                key=lambda item: (
-                    int(item[4].get("surface_area", 0)),
-                    -float(item[4].get("robot_z_tilt_deg", 180.0)),
-                    -int(item[4].get("candidate_index", 0)),
-                ),
-            )
+            selected, selection_reason = self._select_surface_candidate(passed_options, lambda item: item[4])
             selected_debug = dict(selected[4])
             selected_debug["selected"] = True
-            selected_debug["selection_reason"] = "largest_surface_area_after_robot_z_tilt_filter"
+            selected_debug["selection_reason"] = selection_reason
+            selected_debug["area_dominance_ratio"] = float(self.normal_surface_area_dominance_ratio)
             selected_debug["attempts"] = [
                 {
                     **compact_surface_attempt_debug(attempt),
@@ -571,6 +743,7 @@ class SuctionPipeline:
         surface: np.ndarray,
         object_mask: np.ndarray,
         surface_debug: dict[str, Any],
+        intrinsic: np.ndarray | None,
     ) -> tuple[np.ndarray | None, dict[str, Any]]:
         if not self.class3_depth_split_enabled or self._class_index(instance) != 3:
             return surface, surface_debug
@@ -590,11 +763,27 @@ class SuctionPipeline:
             min_layer_area_ratio=self.class3_depth_split_min_layer_area_ratio,
             min_component_area_px=self.class3_depth_split_min_component_area_px,
         )
-        refined_debug = {**surface_debug, "class3_depth_split": split.debug}
+        refined_debug = {
+            **surface_debug,
+            "class3_depth_split": split.debug,
+        }
         if split.surface is None:
             return surface, refined_debug
 
-        refined_surface = split.surface
+        return self._apply_class3_refined_surface(
+            split.surface,
+            object_mask,
+            surface_debug,
+            refined_debug,
+        )
+
+    def _apply_class3_refined_surface(
+        self,
+        refined_surface: np.ndarray,
+        object_mask: np.ndarray,
+        surface_debug: dict[str, Any],
+        refined_debug: dict[str, Any],
+    ) -> tuple[np.ndarray | None, dict[str, Any]]:
         surface_area = int(np.count_nonzero(refined_surface))
         object_area = max(int(np.count_nonzero(object_mask > 0)), 1)
         area_ratio = float(surface_area / object_area)
@@ -685,6 +874,245 @@ class SuctionPipeline:
             "min_allowed_dot": float(self.normal_surface_directional_tilt_min_allowed_dot),
             "allowed_dot": None if allowed_dot is None else float(allowed_dot),
         }
+
+    def _select_surface_candidate(
+        self,
+        items: list[Any],
+        debug_getter: Any,
+    ) -> tuple[Any, str]:
+        if len(items) == 1:
+            return items[0], "only_passed_surface"
+
+        by_area = sorted(
+            items,
+            key=lambda item: (
+                self._surface_area(debug_getter(item)),
+                -float(debug_getter(item).get("robot_z_tilt_deg", 180.0)),
+                -int(debug_getter(item).get("candidate_index", 0)),
+            ),
+            reverse=True,
+        )
+        best_area = self._surface_area(debug_getter(by_area[0]))
+        second_area = self._surface_area(debug_getter(by_area[1])) if len(by_area) > 1 else 0
+        dominance_ratio = max(float(self.normal_surface_area_dominance_ratio), 1.0)
+        if second_area <= 0 or best_area >= second_area * dominance_ratio:
+            return by_area[0], "largest_surface_area_dominates"
+
+        selected = min(
+            items,
+            key=lambda item: (
+                self._normal_angular_std(debug_getter(item)),
+                -self._surface_area(debug_getter(item)),
+                float(debug_getter(item).get("robot_z_tilt_deg", 180.0)),
+                int(debug_getter(item).get("candidate_index", 0)),
+            ),
+        )
+        return selected, "lowest_normal_angular_std_area_tie"
+
+    @staticmethod
+    def _surface_area(debug: dict[str, Any]) -> int:
+        try:
+            return int(debug.get("surface_area", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _normal_angular_std(debug: dict[str, Any]) -> float:
+        value = debug.get("normal_angular_std_deg")
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return float("inf")
+        if not np.isfinite(result):
+            return float("inf")
+        return result
+
+    def _normal_surface_grasp_depth(
+        self,
+        depth_image: np.ndarray | None,
+        surface: np.ndarray,
+        object_mask: np.ndarray,
+        u: int,
+        v: int,
+    ) -> tuple[float | None, dict[str, Any]]:
+        if depth_image is not None:
+            values = valid_depth_values(depth_image, surface > 0)
+            if values.size > 0:
+                return float(np.median(values.astype(np.float64))), {
+                    "grasp_depth_source": "normal_surface_median",
+                    "grasp_depth_valid_pixels": int(values.size),
+                    "grasp_depth_window": None,
+                }
+
+        fallback = median_valid_depth_at_point(
+            depth_image,
+            int(u),
+            int(v),
+            object_mask,
+            window=self.depth_window,
+        )
+        return fallback, {
+            "grasp_depth_source": "surface_median_failed_local_window_fallback" if fallback is not None else "missing_depth",
+            "grasp_depth_valid_pixels": 0,
+            "grasp_depth_window": int(self.depth_window),
+        }
+
+    @staticmethod
+    def _suction_area_pixels(
+        image_shape: tuple[int, ...],
+        footprint: SuctionFootprint | None,
+        suction_area: np.ndarray | None,
+    ) -> int:
+        if suction_area is not None:
+            return int(np.count_nonzero(suction_area))
+        if footprint is None:
+            return 0
+        return int(np.count_nonzero(dual_cup_capsule_mask(image_shape, footprint)))
+
+    def _suction_depth_check(
+        self,
+        depth_image: np.ndarray | None,
+        footprint: SuctionFootprint | None,
+        normal_camera: np.ndarray | None,
+        intrinsic: np.ndarray | None,
+    ) -> dict[str, Any]:
+        debug: dict[str, Any] = {
+            "enabled": bool(self.normal_surface_suction_depth_check_enabled),
+            "passed": True,
+            "reason": None,
+            "max_dual_cup_depth_diff_mm": float(self.normal_surface_suction_depth_check_max_diff_mm),
+            "min_cup_valid_ratio": float(self.normal_surface_suction_depth_check_min_valid_ratio),
+        }
+        if not self.normal_surface_suction_depth_check_enabled:
+            return debug
+        if depth_image is None:
+            debug.update({"passed": False, "reason": "missing_depth_image"})
+            return debug
+        if footprint is None:
+            debug.update({"passed": False, "reason": "missing_suction_footprint"})
+            return debug
+        if intrinsic is None:
+            debug.update({"passed": False, "reason": "missing_intrinsic"})
+            return debug
+
+        normal = np.asarray([0.0, 0.0, 1.0], dtype=np.float64)
+        if normal_camera is not None:
+            candidate = np.asarray(normal_camera, dtype=np.float64).reshape(3)
+            candidate_norm = float(np.linalg.norm(candidate))
+            if candidate_norm >= 1e-9:
+                normal = candidate / candidate_norm
+
+        _, cup_masks = dual_cup_normal_projected_capsule_mask(depth_image.shape[:2], footprint, normal)
+        raw_depth_medians: list[float | None] = []
+        raw_depth_iqrs: list[float | None] = []
+        plane_residual_medians: list[float | None] = []
+        plane_residual_iqrs: list[float | None] = []
+        cup_valid_ratios: list[float] = []
+        cup_valid_counts: list[int] = []
+        cup_pixel_counts: list[int] = []
+        centers = np.asarray(footprint.cup_centers_xy, dtype=np.float64)
+        if centers.shape == (2, 2):
+            center_xy = centers.mean(axis=0)
+        else:
+            center_xy = np.asarray([0.0, 0.0], dtype=np.float64)
+        center_camera = pixel_to_camera(
+            float(center_xy[0]),
+            float(center_xy[1]),
+            float(footprint.depth_mm),
+            intrinsic,
+        )
+        for cup_mask in cup_masks[:2]:
+            pixels = int(np.count_nonzero(cup_mask))
+            cup_pixel_counts.append(pixels)
+            if pixels <= 0:
+                raw_depth_medians.append(None)
+                raw_depth_iqrs.append(None)
+                plane_residual_medians.append(None)
+                plane_residual_iqrs.append(None)
+                cup_valid_ratios.append(0.0)
+                cup_valid_counts.append(0)
+                continue
+            ys, xs = np.where(cup_mask)
+            depths = np.asarray(depth_image[ys, xs], dtype=np.float64)
+            valid_mask = np.isfinite(depths) & (depths > 0.0)
+            valid = depths[valid_mask]
+            valid_xs = xs[valid_mask].astype(np.float64)
+            valid_ys = ys[valid_mask].astype(np.float64)
+            valid_count = int(valid.size)
+            cup_valid_counts.append(valid_count)
+            cup_valid_ratios.append(float(valid_count / max(pixels, 1)))
+            if valid_count <= 0:
+                raw_depth_medians.append(None)
+                raw_depth_iqrs.append(None)
+                plane_residual_medians.append(None)
+                plane_residual_iqrs.append(None)
+                continue
+            raw_q25, raw_q75 = np.percentile(valid, [25.0, 75.0])
+            raw_depth_medians.append(float(np.median(valid)))
+            raw_depth_iqrs.append(float(raw_q75 - raw_q25))
+
+            points = self._pixels_to_camera_points(valid_xs, valid_ys, valid, intrinsic)
+            residuals = (points - center_camera.reshape(1, 3)) @ normal
+            residuals = residuals[np.isfinite(residuals)]
+            if residuals.size <= 0:
+                plane_residual_medians.append(None)
+                plane_residual_iqrs.append(None)
+                continue
+            residual_q25, residual_q75 = np.percentile(residuals, [25.0, 75.0])
+            plane_residual_medians.append(float(np.median(residuals)))
+            plane_residual_iqrs.append(float(residual_q75 - residual_q25))
+
+        debug.update(
+            {
+                "cup_depth_medians_mm": raw_depth_medians,
+                "cup_depth_iqr_mm": raw_depth_iqrs,
+                "cup_plane_residual_medians_mm": plane_residual_medians,
+                "cup_plane_residual_iqr_mm": plane_residual_iqrs,
+                "cup_valid_ratios": cup_valid_ratios,
+                "cup_valid_counts": cup_valid_counts,
+                "cup_pixel_counts": cup_pixel_counts,
+            }
+        )
+        if len(plane_residual_medians) < 2 or plane_residual_medians[0] is None or plane_residual_medians[1] is None:
+            debug.update({"passed": False, "reason": "missing_cup_depth"})
+            return debug
+        if min(cup_valid_ratios[:2], default=0.0) < self.normal_surface_suction_depth_check_min_valid_ratio:
+            debug.update({"passed": False, "reason": "cup_depth_valid_ratio_too_low"})
+            return debug
+
+        residual_diff = abs(float(plane_residual_medians[0]) - float(plane_residual_medians[1]))
+        debug["dual_cup_plane_residual_diff_mm"] = float(residual_diff)
+        debug["dual_cup_depth_diff_mm"] = float(residual_diff)
+        if residual_diff > self.normal_surface_suction_depth_check_max_diff_mm:
+            debug.update({"passed": False, "reason": "dual_cup_depth_diff_too_large"})
+        return debug
+
+    @staticmethod
+    def _pixels_to_camera_points(
+        xs: np.ndarray,
+        ys: np.ndarray,
+        depths_mm: np.ndarray,
+        intrinsic: np.ndarray,
+    ) -> np.ndarray:
+        fx = float(intrinsic[0, 0])
+        fy = float(intrinsic[1, 1])
+        cx = float(intrinsic[0, 2])
+        cy = float(intrinsic[1, 2])
+        z = depths_mm.astype(np.float64)
+        x = (xs.astype(np.float64) - cx) * z / fx
+        y = (ys.astype(np.float64) - cy) * z / fy
+        return np.stack((x, y, z), axis=1)
+
+    @staticmethod
+    def _seed_normal_from_debug(surface_debug: dict[str, Any]) -> np.ndarray | None:
+        seed_normal = surface_debug.get("seed_normal")
+        if not isinstance(seed_normal, list) or len(seed_normal) != 3:
+            return None
+        normal = np.asarray(seed_normal, dtype=np.float64).reshape(3)
+        norm = float(np.linalg.norm(normal))
+        if norm < 1e-9:
+            return None
+        return normal / norm
 
     def _compute_surface_footprint(
         self,

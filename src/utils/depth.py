@@ -14,7 +14,9 @@ class DepthLayerSplit:
 
 
 def valid_depth_values(depth_image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    values = depth_image[: mask.shape[0], : mask.shape[1]][mask]
+    height = min(depth_image.shape[0], mask.shape[0])
+    width = min(depth_image.shape[1], mask.shape[1])
+    values = depth_image[:height, :width][mask[:height, :width] > 0]
     return values[np.isfinite(values) & (values > 0)]
 
 
@@ -293,4 +295,3 @@ def _largest_depth_layer_component(
     if best_mask is None or best_area < int(min_component_area_px):
         return None, None, {**debug, "selected_component_area": int(best_area)}
     return best_mask, best_layer, {**debug, "selected_component_area": int(best_area)}
-

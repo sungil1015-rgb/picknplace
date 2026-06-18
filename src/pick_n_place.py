@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 import os
+import time
 from pathlib import Path
 
 import cv2
@@ -164,10 +165,15 @@ class PickNPlace:
         priority_config = str(_required(self.priority_cfg, "config", "priority"))
         try:
             config = _load_yaml(priority_config)
-            priority_cfg = config.get("priority", {})
+            priority_cfg = config.get("priority") or {}
             if not isinstance(priority_cfg, dict):
                 raise ValueError("priority config section 'priority' must be a mapping")
-            scorer = GraspPriorityScorer(local_depth_window=int(priority_cfg.get("local_depth_window", 11)))
+            scorer = GraspPriorityScorer(
+                known_top_count=int(priority_cfg.get("known_top_count", 4)),
+                unknown_top_count=int(priority_cfg.get("unknown_top_count", 2)),
+                unknown_low_similarity_threshold=float(priority_cfg.get("unknown_low_similarity_threshold", 0.78)),
+                unknown_low_vote_threshold=float(priority_cfg.get("unknown_low_vote_threshold", 1.0)),
+            )
             self.logger.info(f"[{self.name}] GraspPriorityScorer 로드 완료: {priority_config}")
             return scorer
         except Exception as exc:
@@ -273,6 +279,14 @@ class PickNPlace:
         self.logger.info(f"[{self.name}]   depth : {depth_image.shape if depth_image is not None else None}")
         self.logger.info(f"[{self.name}]   normal: {normal_image.shape if normal_image is not None else None}")
         self.logger.info(f"[{self.name}]   roi_2d: {roi_2d}")
+        run_start = time.perf_counter()
+        timing = {
+            "seg_sec": 0.0,
+            "classifi_sec": 0.0,
+            "normal_sec": 0.0,
+            "prior_sec": 0.0,
+            "run_sec": 0.0,
+        }
         resolved_roi_2d = self._resolve_segmentation_roi(rgb_image, roi_2d)
 
         # ── 더미: detector 가 없으면 예시 결과 반환 ──
@@ -305,10 +319,14 @@ class PickNPlace:
                 "pts_per_object": [1, 1],           # List[int] — 객체별 suction 후보 개수
                 "suction_points": suction_points,   # List[List[((x,y,z),(qx,qy,qz,qw))]] — 로봇 좌표
                 "2d_roi": resolved_roi_2d,
+                "timing": timing,
             }
+            result["timing"]["run_sec"] = float(time.perf_counter() - run_start)
             return result, []
 
+        seg_start = time.perf_counter()
         predictions = self.detector.inference(rgb_image, crop_box=resolved_roi_2d)
+        timing["seg_sec"] = float(time.perf_counter() - seg_start)
 
         polygons: List[List[List[int]]] = []
         class_ids: List[int] = []
@@ -337,11 +355,15 @@ class PickNPlace:
                 "pts_per_object": [],
                 "suction_points": [],
                 "2d_roi": resolved_roi_2d,
+                "timing": timing,
             }
+            result["timing"]["run_sec"] = float(time.perf_counter() - run_start)
             return result, kept_predictions
 
         if self.classifier is not None:
+            classifi_start = time.perf_counter()
             class_predictions = self.classifier.classify_instances(rgb_image, kept_predictions)
+            timing["classifi_sec"] = float(time.perf_counter() - classifi_start)
             class_ids = [prediction.class_index for prediction in class_predictions]
             for instance, class_prediction in zip(kept_predictions, class_predictions):
                 instance.label = class_prediction.label
@@ -358,11 +380,23 @@ class PickNPlace:
         else:
             class_ids = [int(prediction.label) if prediction.label is not None else 0 for prediction in kept_predictions]
 
+        normal_start = time.perf_counter()
+        self.suction_pipeline.prepare_priority_depth_masks(
+            kept_predictions,
+            depth_image,
+            normal_image,
+            self.c_matrix,
+            self.extrinsic,
+        )
+        timing["normal_sec"] += float(time.perf_counter() - normal_start)
+
+        prior_start = time.perf_counter()
         priority_scores = self.priority_scorer.score_instances(
             kept_predictions,
             depth_image,
             resolved_roi_2d,
         )
+        timing["prior_sec"] = float(time.perf_counter() - prior_start)
         for instance, priority_score in zip(kept_predictions, priority_scores):
             instance.grasp_priority = priority_score.total
             instance.grasp_depth_score = priority_score.depth_score
@@ -371,7 +405,10 @@ class PickNPlace:
             instance.grasp_xy = list(priority_score.grasp_xy) if priority_score.grasp_xy is not None else None
             instance.grasp_valid_depth = priority_score.valid_depth
             instance.grasp_class_similarity = priority_score.class_similarity
+            instance.grasp_class_vote_ratio = priority_score.class_vote_ratio
             instance.grasp_class_reject_reason = priority_score.class_reject_reason
+            instance.grasp_depth_source = priority_score.depth_source
+            instance.grasp_priority_stage = priority_score.priority_stage
 
         if compute_suction_pts:
             for instance in kept_predictions:
@@ -382,6 +419,7 @@ class PickNPlace:
 
             target_index = self._select_priority_target_index(kept_predictions, priority_scores)
             if target_index is not None:
+                normal_start = time.perf_counter()
                 target_suction_points = self.suction_pipeline.compute(
                     [kept_predictions[target_index]],
                     depth_image,
@@ -389,6 +427,7 @@ class PickNPlace:
                     self.c_matrix,
                     self.extrinsic,
                 )
+                timing["normal_sec"] += float(time.perf_counter() - normal_start)
                 kept_predictions[target_index].suction_normal_z_score = self._suction_normal_z_score(kept_predictions[target_index])
                 suction_points[target_index] = target_suction_points[0] if target_suction_points else []
 
@@ -414,7 +453,9 @@ class PickNPlace:
             "pts_per_object": [len(points) for points in suction_points],
             "suction_points": suction_points,
             "2d_roi": resolved_roi_2d,
+            "timing": timing,
         }
+        result["timing"]["run_sec"] = float(time.perf_counter() - run_start)
         return result, kept_predictions
 
     @staticmethod
