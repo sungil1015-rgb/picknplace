@@ -67,6 +67,16 @@
   <div class="meta">SOURCE: src/defect/* , src/classifier/dinov2.py , src/pick_n_place.py · 기준 커밋 detector@091ea75 · 동반 문서 ALGORITHM_REPORT.md</div>
 </header>
 
+<div style="margin:18px 0 4px;background:#eef0fc;border:1px solid #4338ca;border-left-width:5px;border-radius:9px;padding:13px 18px;font-size:13.5px;color:#15181f">
+  <b style="font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:#4338ca">현행 운영 상태 (2026-06-19 갱신)</b><br>
+  아래 도식의 <b>layer 수치(L5/L7/L8)·mango fusion</b>은 <b>base 시절 분석 기준</b>이다. 현재 운영은 →
+  <b>DINOv2-large(dim 1024) · 전 클래스 dinov2_layer=12 통일</b>,
+  <b>mango(젤리껌)는 fusion 아닌 plain patchcore "운에 맡김"(enabled)</b>이며
+  <b>임계는 보수적</b>(τ=max(F1-best, 정상 p99.5) — 비닐 정상 구겨짐 오거부 방지),
+  나머지는 <code style="font-family:var(--mono);font-size:12px">weights/defect_thresholds.json</code>으로 <b>자동 적용</b>(없으면 fail-loud).
+  로직(PatchCore/Cascade/다수결, 분류↔결함 layer 분리)은 동일.
+</div>
+
 <!-- ============================== FIGURE 1 ============================== -->
 <figure>
   <div class="fig-head">
@@ -165,7 +175,7 @@
     <!-- ===== REGISTRY + DETECTOR (center-left, converge) ===== -->
     <rect x="150" y="558" width="420" height="48" rx="8" fill="#fff" stroke="var(--ink)" stroke-width="1.6"/>
     <text class="t-title" x="360" y="579" text-anchor="middle">DefectRegistry.get(class_index)</text>
-    <text class="t-mono-s" x="360" y="596" text-anchor="middle">0→cascade · 1→fusion · 2,3→patchcore · 4 제외 · 5 우회</text>
+    <text class="t-mono-s" x="360" y="596" text-anchor="middle">0→cascade · 1,2,3→patchcore · 4 제외 · 5 우회</text>
     <line x1="360" y1="606" x2="360" y2="632" stroke="#3a4250" marker-end="url(#ah)"/>
 
     <rect x="150" y="634" width="420" height="54" rx="8" fill="var(--amber-bg)" stroke="var(--amber)" stroke-width="1.4"/>
@@ -402,7 +412,7 @@
       <text x="78" y="709">0</text><text x="150" y="709">haribo</text><text x="320" y="709">cascade</text><text x="470" y="709" fill="#b45309">L5*</text><text x="560" y="709">8.6</text><text x="660" y="709" fill="#047857">✅</text><text x="790" y="709">.93(L5 .94)</text><text x="900" y="709" fill="#5b6472">≥2/4 다수결</text>
 
       <rect x="60" y="718" width="1120" height="28" fill="#fafbfc" stroke="var(--line)"/>
-      <text x="78" y="737">1</text><text x="150" y="737">mango</text><text x="320" y="737">fusion</text><text x="470" y="737">L8</text><text x="560" y="737">1.8</text><text x="660" y="737" fill="#c0392b">❌</text><text x="790" y="737">.70→.88</text><text x="900" y="737" fill="#5b6472">=PCmax단독·융합미측정·검증대기</text>
+      <text x="78" y="737">1</text><text x="150" y="737">mango</text><text x="320" y="737">patchcore</text><text x="470" y="737" fill="#b45309">L12</text><text x="560" y="737">p99.5</text><text x="660" y="737" fill="#047857">✅</text><text x="790" y="737">.88(PCmax)</text><text x="900" y="737" fill="#5b6472">"운에 맡김"·보수적 τ(구겨짐 오거부↓)</text>
 
       <rect x="60" y="746" width="1120" height="28" fill="#fff" stroke="var(--line)"/>
       <text x="78" y="765">2</text><text x="150" y="765">pencil_case</text><text x="320" y="765">patchcore</text><text x="470" y="765" fill="#b45309">L5*</text><text x="560" y="765">9.2</text><text x="660" y="765" fill="#047857">✅</text><text x="790" y="765">.986</text><text x="900" y="765" fill="#5b6472">max agg</text>
@@ -416,8 +426,8 @@
       <rect x="60" y="830" width="1120" height="28" fill="#fafbfc" stroke="var(--line)"/>
       <text x="78" y="849">5</text><text x="150" y="849">unknown</text><text x="320" y="849" fill="#c0392b">— 우회</text><text x="470" y="849">—</text><text x="560" y="849">—</text><text x="660" y="849">—</text><text x="790" y="849">—</text><text x="900" y="849" fill="#5b6472">분류기가 거름</text>
     </g>
-    <text class="t-mono-s" x="60" y="878" fill="var(--amber)">* layer/τ는 staged — bank 재빌드+재튜닝 전까지 가드 차단 (현재 bank는 L8)</text>
-    <text class="t-mono-s" x="60" y="894" fill="var(--muted)">τ·통계(8.6/0.10/0.05/1.8/z3.0/μσ/0.30)는 defect_detection.yaml 주입값 — 코드 상수 아님</text>
+    <text class="t-mono-s" x="60" y="878" fill="var(--amber)">현행 운영: 전 클래스 large·L12 통일. layer 칸의 L5*/L7*는 base ablation best(이력). τ는 defect_thresholds.json 자동적용</text>
+    <text class="t-mono-s" x="60" y="894" fill="var(--muted)">뱅크(large·L12)+thresholds.json 없으면 PatchCoreLite/Registry 가드가 fail-loud로 차단(조용한 오판 없음)</text>
   </svg>
   </div>
   <div class="legend">

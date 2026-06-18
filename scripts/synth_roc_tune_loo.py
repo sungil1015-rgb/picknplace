@@ -239,13 +239,24 @@ def tune_one_class(target, processor, model, device, output_dir, max_obj=80):
     best_fpr = float(fpr[best_idx])
 
     normal_p99 = float(np.percentile(normal_scores, 99))
+    normal_p995 = float(np.percentile(normal_scores, 99.5))
     defect_p01 = float(np.percentile(defect_scores, 1))
     overlap = "OVERLAP" if defect_p01 < normal_p99 else "SEPARATED"
+
+    # 운영 τ — mango만 보수적(higher τ): 합성 TPR 검증 불가 → 신뢰 가능한 정상분포 분위수로
+    # 오거부(FPR)를 직접 통제. max()는 분위수가 비정상적으로 낮을 때의 하한 보호. 나머지는 F1-best 유지.
+    if name == "mango":
+        operating_th = float(max(best_th, normal_p995))
+        th_source = "max(F1-best,p99.5)"
+    else:
+        operating_th = best_th
+        th_source = "F1-best"
 
     print(f"\n  AUROC: {auroc:.3f}  [{overlap}]")
     print(f"  normal LOO: n={len(normal_scores)}, mean={normal_scores.mean():.2f}, std={normal_scores.std():.2f}, p95={np.percentile(normal_scores, 95):.2f}, p99={normal_p99:.2f}")
     print(f"  defect:     n={len(defect_scores)}, mean={defect_scores.mean():.2f}, std={defect_scores.std():.2f}, p01={defect_p01:.2f}, p05={np.percentile(defect_scores, 5):.2f}")
     print(f"  F1-best τ={best_th:.2f}, F1={best_f1:.3f}, TPR={best_tpr:.3f}, FPR={best_fpr:.3f}")
+    print(f"  → operating τ={operating_th:.2f} ({th_source}) [p99={normal_p99:.2f}, p99.5={normal_p995:.2f}]")
 
     # 시각화
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
@@ -280,6 +291,7 @@ def tune_one_class(target, processor, model, device, output_dir, max_obj=80):
         "name": name, "polygon_id": poly_id, "auroc": auroc,
         "mb_file": mb_file,
         "best_threshold": best_th, "best_f1": best_f1,
+        "normal_p995": normal_p995, "operating_threshold": operating_th, "th_source": th_source,
         "best_tpr": best_tpr, "best_fpr": best_fpr,
         "normal_p99": normal_p99, "defect_p01": defect_p01,
         "overlap": overlap, "prev_threshold": prev_th,
@@ -312,7 +324,8 @@ def main():
 
     # ── 임계 오버라이드 파일 생성 (DefectRegistry가 자동 적용) ──
     # 키 = memory_bank basename. 이 파일을 weights/에 두면 config 수동 편집 없이 τ 적용됨.
-    out = {r["mb_file"]: round(float(r["best_threshold"]), 4) for r in results}
+    # defect_thresholds.json은 operating_threshold 채택 (mango=보수적 분위수, 나머지=F1-best)
+    out = {r["mb_file"]: round(float(r["operating_threshold"]), 4) for r in results}
     th_path = ROOT / "weights" / "defect_thresholds.json"
     th_path.parent.mkdir(parents=True, exist_ok=True)
     th_path.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")

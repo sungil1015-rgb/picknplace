@@ -149,7 +149,9 @@ python -c "from src.defect.registry import DefectRegistry; r=DefectRegistry('con
 ## 7. mango (젤리껌) 특별 주의
 
 - mango는 검증된 fusion 대신 **plain patchcore "운에 맡김" 모드**로 운영된다 (TPR 정량검증 없음, "정상에서 벗어나면 잡는다"는 작동은 함).
-- 튜닝 출력에서 **mango의 AUROC / separation(OVERLAP vs SEPARATED)을 수치와 무관하게 반드시 보고**하라.
+- ★ **mango 임계는 보수적(=널널하게, 더 높은 τ)으로 운영한다.** 근거: mango(젤리껌)는 비닐 재질이라 정상도 조금씩 구겨지는데, PatchCore는 외관 거리 기반이라 **정상 구겨짐도 이상으로 본다.** 임계를 세게(낮게) 주면 정상품이 오거부된다. 그래서 `synth_roc_tune_loo.py`가 mango에 한해 `τ = max(F1-best, normal_p99.5)`(정상 LOO 분포 99.5분위)를 적용해 **정상품 오거부를 ~0.5%로 통제**한다. 합성결함이 아니라 **신뢰 가능한 정상 분포(구겨진 정상 포함)**에 기준을 맞추는 것이다. **이 분기는 코드에 내장돼 있으니 yaml/threshold를 손대지 마라.** 다른 클래스(haribo/metal_case/pencil_case)는 F1-best τ 유지.
+- 튜닝 출력에서 **mango의 operating τ와 출처(F1-best vs normal_p99.5 중 채택값), normal_p99/p99.5, AUROC / separation(OVERLAP vs SEPARATED)을 반드시 보고**하라. operating τ가 F1-best보다 높으면 보수적 의도대로 정상 동작이다.
+- ⚠ 한계(보고 시 함께 명시): higher τ는 정의상 **실제 결함 미탐 위험을 키운다**(오거부 0.5% 통제 ≠ 결함 누락 없음). 또 빌드 데이터의 정상 꼬리가 시연환경보다 덜 구겨져 있으면 실제 오거부가 0.5%보다 클 수 있으니 normal_p99/p99.5를 함께 봐 시연환경에서 재확인한다.
 - **약하면(예: AUROC < 0.7 이거나 OVERLAP) 사용자에게 알리고**, "config에서 class 1(mango)을 `enabled: false`로 둘 수 있다"고 **안내만** 하라. (과거 plain-patchcore mango AUROC는 0.7대였으니 0.6 미만만 약한 게 아니다.)
 - ★ **절대 강제로 disable하거나 yaml을 수정하지 마라. 보고만 한다.**
 
@@ -158,8 +160,8 @@ python -c "from src.defect.registry import DefectRegistry; r=DefectRegistry('con
 ## 8. 마무리 보고 형식 (이 형식으로 보고하라)
 
 1. **빌드된 뱅크별 객체 수** — 각 클래스 `objects extracted`, `memory bank shape`(dim이 1024인지 확인)
-2. **`defect_thresholds.json` 내용** — 클래스별(키=memory_bank 파일명) τ 전부
-3. **tune AUROC 표 요약** — class / AUROC / sep? / F1-best τ / TPR / FPR (synth_roc_tune 최종 표 그대로)
+2. **`defect_thresholds.json` 내용** — 클래스별(키=memory_bank 파일명) τ 전부. mango는 operating τ(=max(F1-best, normal_p99.5))이며 채택 출처(F1-best vs p99.5)를 명시.
+3. **tune AUROC 표 요약** — class / AUROC / sep? / F1-best τ / **operating τ + 출처** / TPR / FPR / normal_p99·p99.5 (synth_roc_tune 최종 표 그대로)
 4. **경고 / 이상 항목** — OVERLAP 발생, mango 약함, 스킵된 클래스, 비정상 객체 수, color GMM을 새로 빌드했는지 여부 등
 5. **생성 파일 목록 + 절대경로** — `weights/` 내 6개 파일의 절대경로
 
